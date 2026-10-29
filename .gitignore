@@ -1,0 +1,14 @@
+# secrets and local state: never commit
+.env
+.env.*
+!.env.example
+.local/
+data/
+*.sqlite3
+*.log
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+venv/
+fyers*.log

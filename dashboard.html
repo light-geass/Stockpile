@@ -1,0 +1,257 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="csrf" content="__CSRF__">
+<title>__BRAND__ · Indian stock analysis</title>
+<style>
+:root{
+  --bg:#f6f4ef; --card:#ffffff; --ink:#1c2230; --muted:#6b7280; --line:#e8e4da; --soft:#f1eee6;
+  --accent:#2f5d50; --accent-ink:#ffffff; --buy:#1f7a4d; --buy-bg:#e5f3ea; --watch:#9a6a12; --watch-bg:#fbf1da;
+  --avoid:#a23b3b; --avoid-bg:#f8e4e1; --work:#b7791f; --shadow:0 1px 2px rgba(20,30,50,.04),0 8px 28px rgba(20,30,50,.06);
+}
+@media (prefers-color-scheme:dark){:root{
+  --bg:#12161c; --card:#1a2029; --ink:#e8ebf0; --muted:#98a2b3; --line:#2a3240; --soft:#202733;
+  --accent:#6fb59f; --accent-ink:#0f1a16; --buy:#6fd3a0; --buy-bg:#17302a; --watch:#e3b45a; --watch-bg:#33290f;
+  --avoid:#ef8d86; --avoid-bg:#35201f; --work:#e3b45a; --shadow:0 1px 2px rgba(0,0,0,.3),0 8px 28px rgba(0,0,0,.25);}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;-webkit-font-smoothing:antialiased}
+.wrap{max-width:1120px;margin:0 auto;padding:28px 20px 56px}
+header{display:flex;flex-wrap:wrap;gap:16px;align-items:center;justify-content:space-between}
+.brand h1{margin:0;font-size:26px;letter-spacing:-.02em;font-weight:650}
+.brand p{margin:2px 0 0;color:var(--muted);font-size:14px}
+.controls{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+.seg{display:inline-flex;background:var(--soft);border-radius:999px;padding:3px;border:1px solid var(--line)}
+.seg button{border:0;background:transparent;color:var(--muted);padding:8px 16px;border-radius:999px;font:inherit;cursor:pointer;font-weight:550}
+.seg button[aria-pressed=true]{background:var(--card);color:var(--ink);box-shadow:0 1px 3px rgba(0,0,0,.08)}
+.focusbar{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-top:16px}
+.sb{position:relative;flex:1 1 300px;min-width:240px}
+.sb input{width:100%;border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:12px;padding:10px 14px;font:inherit}
+.sb input:focus-visible{outline:2px solid var(--accent);outline-offset:-1px}
+.list{position:absolute;z-index:5;left:0;right:0;top:calc(100% + 4px);margin:0;padding:4px;list-style:none;background:var(--card);border:1px solid var(--line);border-radius:12px;box-shadow:var(--shadow);max-height:320px;overflow:auto}
+.list li{padding:8px 10px;border-radius:8px;cursor:pointer;display:flex;gap:8px;align-items:baseline;justify-content:space-between}
+.list li[aria-selected=true]{background:var(--soft)}
+.list li small{color:var(--muted);font-size:12px;text-align:right}
+.list .note{padding:8px 10px;color:var(--muted);cursor:default;font-size:13px;display:block}
+.sel{display:flex;gap:8px;align-items:center;background:var(--soft);border:1px solid var(--line);border-radius:999px;padding:6px 6px 6px 14px;font-size:13.5px}
+.sel b{font-weight:650}.sel small{color:var(--muted)}
+.sel button{all:unset;cursor:pointer;color:var(--muted);padding:0 8px;font-size:16px;line-height:1}
+.sel button:focus-visible{outline:2px solid var(--accent);border-radius:6px}
+.btn{border:0;background:var(--accent);color:var(--accent-ink);padding:10px 20px;border-radius:999px;font:inherit;font-weight:600;cursor:pointer;transition:transform .12s,opacity .12s}
+.btn:hover:not(:disabled){transform:translateY(-1px)} .btn:disabled{opacity:.45;background:var(--soft);color:var(--muted);cursor:not-allowed;transform:none}
+.btn.ghost{background:var(--card);color:var(--ink);border:1px solid var(--line);font-weight:550;padding:8px 14px;font-size:14px}
+.pill{display:inline-flex;align-items:center;gap:8px;background:var(--card);border:1px solid var(--line);border-radius:999px;padding:6px 8px 6px 12px;font-size:13px;color:var(--muted)}
+.dot{width:9px;height:9px;border-radius:50%;background:#b8b3a6;flex:none}
+.dot.connected,.dot.done{background:var(--buy)} .dot.expired,.dot.error,.dot.unavailable{background:var(--avoid)}
+.dot.working{background:var(--work);animation:pulse 1.1s ease-in-out infinite}
+@keyframes pulse{0%,100%{box-shadow:0 0 0 0 rgba(183,121,31,.5)}50%{box-shadow:0 0 0 6px rgba(183,121,31,0)}}
+.banner{margin-top:18px;border-radius:14px;padding:12px 16px;font-size:14px;border:1px solid var(--line);background:var(--card)}
+.banner.good{background:var(--buy-bg);border-color:transparent;color:var(--buy)} .banner.bad{background:var(--avoid-bg);border-color:transparent;color:var(--avoid)}
+.banner.warn{background:var(--watch-bg);border-color:transparent;color:var(--watch)}
+.kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-top:22px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:18px;box-shadow:var(--shadow)}
+.kpi{padding:18px 20px} .kpi small{color:var(--muted);font-size:12.5px;letter-spacing:.04em;text-transform:uppercase}
+.kpi b{display:block;font-size:30px;letter-spacing:-.02em;margin-top:4px;font-weight:650}
+.kpi span{color:var(--muted);font-size:13px}
+h2{font-size:13px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:34px 0 12px;font-weight:600}
+.agents{display:grid;grid-template-columns:repeat(4,1fr);gap:14px}
+.agent{padding:16px 18px;position:relative;transition:border-color .2s}
+.agent[data-s=working]{border-color:var(--work)} .agent[data-s=done]{border-color:color-mix(in srgb,var(--buy) 45%,var(--line))}
+.agent .top{display:flex;justify-content:space-between;align-items:center}
+.agent h3{margin:0;font-size:16px;font-weight:620}
+.agent p{margin:2px 0 12px;color:var(--muted);font-size:13px;min-height:19px}
+.stats{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.stat{background:var(--soft);border-radius:10px;padding:8px 10px;min-height:46px}
+.stat small{display:block;color:var(--muted);font-size:11px;text-transform:capitalize}.stat b{font-size:15px;font-weight:620}
+.feed{display:flex;flex-direction:column;gap:12px}
+.row{padding:0;overflow:hidden}
+.row>button.head{all:unset;box-sizing:border-box;cursor:pointer;display:grid;grid-template-columns:minmax(150px,1.2fr) 100px minmax(160px,1fr) 2fr 20px;gap:16px;align-items:center;width:100%;padding:16px 20px}
+.row>button.head:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+.sym b{font-size:17px;font-weight:650}.sym small{display:block;color:var(--muted);font-size:12.5px}
+.chip{display:inline-block;font-size:11px;padding:2px 8px;border-radius:999px;background:var(--soft);color:var(--muted);margin-left:6px;vertical-align:2px}
+.badge{display:inline-block;padding:5px 12px;border-radius:999px;font-weight:650;font-size:13px;letter-spacing:.03em;text-align:center}
+.badge.BUY{background:var(--buy-bg);color:var(--buy)}.badge.WATCH{background:var(--watch-bg);color:var(--watch)}.badge.AVOID{background:var(--avoid-bg);color:var(--avoid)}
+.conv small{color:var(--muted);font-size:12px;display:block;margin-bottom:4px}
+.bar{height:6px;border-radius:99px;background:var(--soft);overflow:hidden}.bar i{display:block;height:100%;background:var(--accent);border-radius:99px;width:calc(var(--v)*10%)}
+.px{font-variant-numeric:tabular-nums}.up{color:var(--buy)}.dn{color:var(--avoid)}
+.why{color:var(--muted);font-size:13.5px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.caret{color:var(--muted);transition:transform .2s}.row[data-open=true] .caret{transform:rotate(90deg)}
+.detail{display:none;border-top:1px solid var(--line);padding:18px 20px;background:color-mix(in srgb,var(--soft) 55%,var(--card))}
+.row[data-open=true] .detail{display:block}
+.dg{display:grid;grid-template-columns:repeat(2,1fr);gap:18px}
+.detail h4{margin:0 0 8px;font-size:12px;letter-spacing:.07em;text-transform:uppercase;color:var(--muted);font-weight:600}
+.detail ul{margin:0;padding-left:18px}.detail li{margin:3px 0;font-size:13.5px}.detail a{color:var(--accent)}
+.sc{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}.sc span{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:5px 10px;font-size:12.5px;color:var(--muted)}.sc b{color:var(--ink)}
+.tag{font-size:11.5px;color:var(--muted)} .tag.warnt{color:var(--watch)}
+.empty{padding:44px 20px;text-align:center;color:var(--muted)}
+footer{margin-top:36px;color:var(--muted);font-size:13px;display:flex;flex-direction:column;gap:6px}
+footer .foot-main{font-weight:550;color:var(--ink)}
+@media (max-width:900px){.kpis,.agents{grid-template-columns:repeat(2,1fr)}.row>button.head{grid-template-columns:1fr auto;gap:10px}.row .conv,.row .why{grid-column:1/-1}.dg{grid-template-columns:1fr}}
+@media (max-width:480px){.kpis,.agents{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="brand"><h1>__BRAND__</h1><p id="sub">Indian stock analysis · 8 agents on duty</p></div>
+    <div class="controls">
+      <span class="pill" id="fyPill"><i class="dot" id="fyDot"></i><span id="fyLabel">FYERS</span><button class="btn ghost" id="fyBtn">Connect FYERS</button></span>
+      <button class="btn" id="go">Run analysis</button>
+    </div>
+  </header>
+  <div class="focusbar">
+    <div class="sb">
+      <input id="q" type="search" role="combobox" aria-label="Search a stock, ETF or listed IPO" aria-autocomplete="list"
+        aria-controls="res" aria-expanded="false" autocomplete="off" placeholder="Search a stock / ETF / listed IPO (e.g. TCS, NIFTYBEES)">
+      <ul class="list" id="res" role="listbox" aria-label="Search suggestions" hidden></ul>
+    </div>
+    <span class="sel" id="sel" hidden></span>
+    <button class="btn" id="goSel" disabled>Analyze selected</button>
+  </div>
+  <div id="notices"></div>
+  <section class="kpis" aria-label="Summary">
+    <div class="card kpi"><small>Universe</small><b id="k1">–</b><span>stocks scanned</span></div>
+    <div class="card kpi"><small>In debate</small><b id="k2">–</b><span>shortlisted by Scout</span></div>
+    <div class="card kpi"><small>Buy signals</small><b id="k3">–</b><span>verdict = BUY</span></div>
+    <div class="card kpi"><small>Top pick</small><b id="k4">–</b><span id="k4s">conviction score</span></div>
+  </section>
+  <h2>Agent pipeline</h2>
+  <section class="agents" id="agents"></section>
+  <h2>Verdicts</h2>
+  <section class="feed" id="feed"><div class="card empty">No run yet. Press <b>Run analysis</b> to scan NSE stocks.</div></section>
+  <footer id="foot"><span class="foot-main">Analysis only. No trades are ever placed.</span>
+    <span>Conviction (x/10) is an internal score, not a probability of profit. Not investment advice.</span></footer>
+</div>
+<script nonce="__NONCE__">
+const $=s=>document.querySelector(s);
+const CSRF=document.querySelector('meta[name=csrf]').content;
+let cfg=null,poll=null;
+function h(tag,attrs={},...kids){const e=document.createElement(tag);for(const[k,v]of Object.entries(attrs)){if(k==='class')e.className=v;else if(k.startsWith('on'))e.addEventListener(k.slice(2),v);else if(v!==false&&v!=null)e.setAttribute(k,v)}
+ for(const c of kids.flat()){if(c==null||c===false)continue;e.append(c.nodeType?c:document.createTextNode(String(c)))}return e}
+async function api(path,opt={}){const r=await fetch(path,{credentials:'same-origin',...opt,headers:{'Content-Type':'application/json','X-CSRF-Token':CSRF,...(opt.headers||{})}});
+ if(r.status===401){location.href='/unlock';throw new Error('locked')}return r}
+const fmtPx=x=>x==null?'n/a':'₹'+Number(x).toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2});
+const fmtPct=x=>x==null?'n/a':(x>0?'+':'')+Number(x).toFixed(2)+'%';
+
+function notice(level,text){const n=$('#notices');n.replaceChildren(h('div',{class:'banner '+level,role:'status'},text))}
+async function loadConfig(){
+ const c=await(await api('/api/config')).json();cfg=c;
+ const f=c.fyers;$('#fyDot').className='dot '+f.state;$('#fyLabel').textContent='FYERS · '+f.label;$('#fyLabel').title=f.detail||'';
+ const btn=$('#fyBtn');btn.textContent=f.state==='connected'?'Reconnect':'Connect FYERS';btn.disabled=f.state==='not_configured';
+ btn.onclick=()=>{ if(c.tunnel&&!c.on_tunnel_host){notice('warn','Open this dashboard at https://'+c.redirect_host+' and click Connect FYERS there, so cookies and OAuth state match.');return}location.href='/auth/fyers/login'};
+ if(c.notice)notice(c.notice.level,c.notice.text);
+ const q=new URLSearchParams(location.search).get('auth');
+ if(q){const n=await(await api('/api/auth-notice/'+encodeURIComponent(q))).json();notice(n.level,n.text);history.replaceState(null,'','/')}
+ $('#sub').textContent='Indian stock analysis · 8 agents on duty'+(c.groq?' · LLM panel ready':' · deterministic engine');
+}
+
+function renderAgents(a,focused=false){const g=$('#agents');g.replaceChildren(...Object.entries(a).map(([k,v])=>{ if(focused&&k==='scout')v={...v,role:'Retrieves the selected instrument'};
+ const st=Object.entries(v.stats||{});
+ return h('div',{class:'card agent','data-s':v.status},
+  h('div',{class:'top'},h('h3',{},v.name),h('i',{class:'dot '+v.status,title:v.status})),
+  h('p',{},v.role),
+  h('div',{class:'stats'},st.length?st.slice(0,2).map(([l,x])=>h('div',{class:'stat'},h('small',{},l),h('b',{},x))):[h('div',{class:'stat'},h('small',{},'status'),h('b',{},v.status))]))}))}
+
+function chip(t){return h('span',{class:'chip'},t)}
+function renderRow(r){
+ const d=r.detail,up=(r.chg||0)>=0;
+ const row=h('div',{class:'card row','data-open':'false'});
+ const head=h('button',{class:'head','aria-expanded':'false',onclick:()=>{const o=row.dataset.open!=='true';row.dataset.open=o;head.setAttribute('aria-expanded',o)}},
+  h('div',{class:'sym'},h('b',{},r.symbol),chip(r.asset_type||r.cap),h('small',{},r.name)),
+  h('div',{},h('span',{class:'badge '+r.verdict},r.verdict)),
+  h('div',{class:'conv'},h('small',{},`Conviction ${r.confidence}/10 · ${r.winner} won`),h('div',{class:'bar',style:`--v:${r.confidence}`},h('i'))),
+  h('div',{},h('div',{class:'px'},fmtPx(r.price)+' ',h('span',{class:up?'up':'dn'},fmtPct(r.chg))),h('div',{class:'why'},r.why)),
+  h('span',{class:'caret'},'›'));
+ const sc=d.scores,names={bull:'Bull',bear:'Bear',technicals:'Technicals',fundamentals:'Fundamentals',news:'News'};
+ const scoreChips=h('div',{class:'sc'},Object.entries(names).map(([k,n])=>h('span',{},n+' ',h('b',{},sc[k]&&sc[k].score!=null?sc[k].score:'n/a'))));
+ const pts=Object.entries(sc).map(([k,v])=>{const lines=v.point?[v.point]:(v.reasons||[]);return lines.length?h('li',{},h('b',{},names[k]+': '),lines.join(' · ')):null}).filter(Boolean);
+ const news=(d.news||[]).map(n=>h('li',{},(n.url&&n.url.startsWith('https://'))?h('a',{href:n.url,target:'_blank',rel:'noopener noreferrer'},n.title):n.title,' ',h('span',{class:'tag'},`${n.sentiment||''} ${n.domain?'· '+n.domain:''}`)));
+ const an=d.analyst||{};
+ const al=r.alert&&r.alert.status!=='none'?h('div',{class:'tag'},`Alert: ${r.alert.status}${r.alert.reason?' — '+r.alert.reason:''}`):null;
+ row.append(head,h('div',{class:'detail'},scoreChips,
+  h('div',{class:'dg'},
+   h('div',{},h('h4',{},'Panel reasoning'),h('ul',{},pts),d.news_note?h('p',{class:'tag'},d.news_note):null),
+   h('div',{},h('h4',{},'Headlines (headline-only evidence)'),news.length?h('ul',{},news):h('p',{class:'tag'},'No relevant headlines found.'),
+    h('h4',{style:'margin-top:14px'},'Analyst data'),
+    h('p',{class:'tag'},an.consensus?`Consensus ${an.consensus} · ${an.num_analysts??'?'} analysts · buy ${an.buy_pct??'n/a'}% · target ${fmtPx(an.target_mean)} (${fmtPct(an.upside_pct)})`:'Analyst data unavailable.'),
+    h('p',{class:'tag'},d.limitation||''))),
+  h('div',{style:'margin-top:12px;display:flex;flex-direction:column;gap:4px'},
+   h('div',{class:'tag'},`Engine: ${r.engine}${r.fallback?' (fallback: '+r.fallback+')':''} · data: ${r.freshness}${r.quote_age!=null?' ('+r.quote_age+'s old)':''}${d.rvol_method?' · RVOL: '+d.rvol_method:''}`),
+   r.guards&&r.guards.length?h('div',{class:'tag warnt'},r.guards.join('; ')):null,
+   r.gaps&&r.gaps.length?h('div',{class:'tag warnt'},'Data gaps: '+r.gaps.join(', ')):null,al)));
+ return row}
+
+function render(s){
+ const focused=s.scope==='focused';
+ renderAgents(s.agents,focused);
+ $('.kpis').children[0].querySelector('span').textContent=focused?'selected instrument':'stocks scanned';
+ $('.kpis').children[1].querySelector('span').textContent=focused?'analysed':'shortlisted by Scout';
+ $('.kpis').children[2].querySelector('span').textContent=focused?'in this instrument':'verdict = BUY';
+ $('.kpis').children[0].querySelector('small').textContent=focused?'Instrument':'Universe';
+ const idle=s.status==='idle';
+ const k=s.kpis;$('#k1').textContent=focused?(s.target?s.target.symbol:'–'):(k.universe||(idle?'–':0));$('#k2').textContent=idle?'–':k.in_debate;$('#k3').textContent=idle?'–':k.buys;
+ $('#k4').textContent=idle?'–':(k.top_pick?k.top_pick.symbol:'–');$('#k4s').textContent=(!idle&&k.top_pick)?`${k.top_pick.verdict} · conviction ${k.top_pick.confidence}/10`:'conviction score';
+ const warns=s.warnings.map(w=>h('div',{class:'banner warn'},w));
+ const msg=s.status==='error'?[h('div',{class:'banner bad',role:'alert'},s.message)]:[];
+ if(s.status!=='idle')$('#notices').replaceChildren(...msg,...warns);
+ $('#k1').title=focused&&s.target?`${s.target.name||''} · ${s.target.exchange||''} · ${s.target.provider_symbol||''}`.trim():'';
+ if(s.verdicts.length)$('#feed').replaceChildren(...s.verdicts.map(renderRow));
+ else if(s.status==='running')$('#feed').replaceChildren(h('div',{class:'card empty'},'Agents are working…'));
+ const f=s.footer;
+ $('#foot').replaceChildren(
+  h('span',{class:'foot-main'},f?`${f.text} · data pulled ${f.pulled_at||'n/a'} · engine: ${s.engine||'n/a'}`:'Analysis only. No trades are ever placed.'),
+  h('span',{},'Analysis only. No trade was placed. Conviction (x/10) is an internal score, not a probability of profit. Not investment advice.'));
+}
+
+function startPoll(){if(!poll)poll=setInterval(tick,700);tick()}
+
+// ---- search & select: debounced, stale-response safe, keyboard accessible ----
+let chosen=null,timer=null,seq=0,items=[],active=-1;
+function closeList(){items=[];active=-1;$('#res').hidden=true;$('#res').replaceChildren();$('#q').setAttribute('aria-expanded','false');$('#q').removeAttribute('aria-activedescendant')}
+function note(t){const l=$('#res');l.replaceChildren(h('li',{class:'note',role:'presentation'},t));l.hidden=false;$('#q').setAttribute('aria-expanded','true')}
+function paintList(){$('#res').replaceChildren(...items.map((it,i)=>h('li',{id:'opt'+i,role:'option','data-i':i,'aria-selected':String(i===active),onmousedown:e=>{e.preventDefault();pick(i)},onclick:()=>pick(i)},h('span',{},h('b',{},it.symbol),' ',h('small',{},it.name)),h('small',{},`${it.exchange||''} ${it.asset_type||''}`.trim()))));$('#res').hidden=false;$('#q').setAttribute('aria-expanded','true');$('#q').setAttribute('aria-activedescendant',active>=0?'opt'+active:'')}
+function pick(i){const it=items[i];if(!it)return;chosen=it;$('#q').value='';$('#q').setAttribute('aria-expanded','false');closeList();renderSel()}
+function renderSel(){const s=$('#sel');if(!chosen){s.hidden=true;s.replaceChildren();$('#goSel').disabled=true;return}
+ s.replaceChildren(h('b',{},chosen.symbol),h('small',{},`${chosen.name} · ${chosen.exchange} · ${chosen.asset_type||'EQUITY'}`),h('button',{'aria-label':'Clear selection',title:'Clear',onclick:()=>{chosen=null;renderSel();$('#q').focus()}},'×'));s.hidden=false;$('#goSel').disabled=false}
+async function search(){
+ const q=$('#q').value.trim(),my=++seq;
+ if(q.length<2){closeList();return}
+ note('Searching…');
+ let r;try{r=await api('/api/instruments/search?q='+encodeURIComponent(q))}catch(e){if(my===seq)note('Search failed. Check the connection and try again.');return}
+ if(my!==seq)return;
+ if(r.status===503){note('Symbol list is temporarily unavailable.');return}
+ if(r.status===429){note('Too many searches. Wait a minute.');return}
+ if(!r.ok){note('Search failed.');return}
+ const d=await r.json();if(my!==seq)return;
+ items=d.results||[];active=-1;
+ if(!items.length){note('No matching NSE instrument.');return}
+ paintList();
+ const l=$('#res');if(d.stale)l.insertBefore(h('li',{class:'note',role:'presentation'},'Using a cached list; refreshing is pending.'),l.firstChild);
+}
+$('#q').addEventListener('input',()=>{
+ if(chosen){chosen=null;renderSel()}
+ clearTimeout(timer);timer=setTimeout(search,250)});
+$('#q').addEventListener('keydown',e=>{if(e.key==='Escape'){closeList();return}
+ if(!items.length)return;
+ if(e.key==='ArrowDown'||e.key==='ArrowUp'){e.preventDefault();active=(active+(e.key==='ArrowDown'?1:-1)+items.length)%items.length;paintList();return}
+ if(e.key==='Enter'&&active>=0){e.preventDefault();pick(active)}});
+$('#q').addEventListener('blur',()=>setTimeout(closeList,120));
+$('#goSel').onclick=async()=>{if(!chosen)return;
+ const r=await api('/api/analyze-selected',{method:'POST',body:JSON.stringify({provider_symbol:chosen.provider_symbol})});
+ if(r.status===409){notice('warn','A run is already in progress.');return}
+ if(!r.ok){const d=await r.json().catch(()=>({}));notice('bad',d.message||'Could not start the focused analysis.');return}
+ startPoll()};
+
+async function tick(){const s=await(await api('/api/status')).json();render(s);
+ $('#go').disabled=!!s.running;$('#go').textContent=s.running?'Running…':'Run analysis';
+ $('#goSel').disabled=!!s.running||!chosen;
+ if(!s.running&&poll){clearInterval(poll);poll=null;loadConfig()}}
+$('#go').onclick=async()=>{
+ const r=await api('/api/start',{method:'POST',body:JSON.stringify({mode:'live'})});
+ if(r.status===409){notice('warn','A run is already in progress.')}
+ startPoll()};
+loadConfig().then(tick);
+</script>
+</body>
+</html>
