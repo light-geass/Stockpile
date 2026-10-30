@@ -1,10 +1,13 @@
 """Provider-neutral data layer: universe, symbol mapping, scout screening, yfinance fundamentals."""
 import json
+import logging
 import re
 from datetime import datetime, timezone
 from pathlib import Path
 
 from evidence import empty_analyst
+
+log = logging.getLogger("datasources")
 
 BASE = Path(__file__).resolve().parent
 _NSE_EQ = re.compile(r"^NSE:(.+)-EQ$")  # greedy: hyphens belong to the ticker (BAJAJ-AUTO, M&M)
@@ -57,6 +60,14 @@ def screen(universe, quotes, per_bucket):
     return shortlisted
 
 
+def _num(v):
+    """yfinance can return NaN (a float, not None) for a missing field; treat it as missing."""
+    try:
+        return None if v is None or v != v else v
+    except Exception:
+        return v
+
+
 def fetch_fundamentals(yf_symbol, yf_module=None):
     """Fundamentalist: yfinance metadata + analyst consensus/targets. Everything null-safe. Returns (analyst, meta, gaps, ticker)."""
     gaps = []
@@ -70,18 +81,23 @@ def fetch_fundamentals(yf_symbol, yf_module=None):
         t = yf.Ticker(yf_symbol)
         info = t.info or {}
     except Exception as e:  # network / library failures must never crash a run
+        log.warning("yfinance fetch failed for %s: %s", yf_symbol, type(e).__name__)
         return empty_analyst("yfinance_unavailable"), meta, ["analyst.yfinance_unavailable"], t
+    if not info:
+        # Yahoo returns an empty payload when it blocks/throttles a client: report it instead of a silent None.
+        log.warning("yfinance returned no info for %s (blocked or unknown ticker)", yf_symbol)
+        gaps.append("analyst.yfinance_empty")
     meta = {"sector": info.get("sector"), "name": info.get("longName") or info.get("shortName")}
-    an["consensus"] = info.get("recommendationKey")
-    an["num_analysts"] = info.get("numberOfAnalystOpinions")
-    an["target_mean"] = info.get("targetMeanPrice")
-    an["target_low"] = info.get("targetLowPrice")
-    an["target_high"] = info.get("targetHighPrice")
+    an["consensus"] = _num(info.get("recommendationKey"))
+    an["num_analysts"] = _num(info.get("numberOfAnalystOpinions"))
+    an["target_mean"] = _num(info.get("targetMeanPrice"))
+    an["target_low"] = _num(info.get("targetLowPrice"))
+    an["target_high"] = _num(info.get("targetHighPrice"))
     try:
         rec = t.recommendations
         if rec is not None and len(rec):
             row = rec.iloc[0]
-            sb, b, h, s, ss = (float(row.get(k, 0) or 0) for k in ("strongBuy", "buy", "hold", "sell", "strongSell"))
+            sb, b, h, s, ss = (float(_num(row.get(k, 0)) or 0) for k in ("strongBuy", "buy", "hold", "sell", "strongSell"))
             tot = sb + b + h + s + ss
             if tot > 0:
                 an["buy_pct"], an["hold_pct"] = round((sb + b) / tot * 100, 1), round(h / tot * 100, 1)

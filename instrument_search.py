@@ -27,6 +27,14 @@ _EQ = re.compile(r"^NSE:([A-Z0-9&\-]+)-EQ$")
 _STRIKE = 15  # field index that is "-1" for cash instruments and a price for derivatives
 
 
+def _is_cash_strike(raw):
+    """FYERS writes the cash marker as "-1" or "-1.0" (it changed to the latter); derivatives carry a real price."""
+    try:
+        return float(_clean(raw, 20)) == -1.0
+    except ValueError:
+        return False
+
+
 class CatalogueError(Exception):
     def __init__(self, kind, message):
         super().__init__(message)
@@ -48,7 +56,7 @@ def parse_master(text):
             continue
         symbol = _clean(row[9], 60).upper()
         m = _EQ.match(symbol)
-        if not m or _clean(row[_STRIKE], 20) != "-1":
+        if not m or not _is_cash_strike(row[_STRIKE]):
             continue  # derivatives, debt, indices or odd series — not analysable cash equity
         short = _clean(row[13], 40).upper() or m.group(1)
         name = _clean(row[1]) or short

@@ -68,6 +68,9 @@ def test_grounding_number_checks():
     assert g.verify_statement("Profit up 12%", ["N1"], idx, facts) == []         # figure from a cited headline
     assert g.verify_statement("Profit up 12%", [], idx, facts)                   # same figure, not cited
     assert g.verify_statement("x", ["E77"], idx, facts)
+    # caller-supplied numbers (panel scores) pass at exact value only, not on rounding
+    assert g.verify_statement("Bull 70 vs bear 10", [], idx, facts, extra=(70, 10)) == []
+    assert g.verify_statement("About 71", [], idx, facts, extra=(70, 10))
 
 
 def test_news_dedupe_relevance_injection():
@@ -83,6 +86,45 @@ def test_news_dedupe_relevance_injection():
                     {"title": "Unrelated company news", "url": "b"}], None
     block, gaps = nw.build_news({"name": "Acme Corp"}, G())
     assert block["total"] == 1 and block["recent"][0]["suspicious"] is True
+
+
+def test_google_news_rss_is_parsed_and_company_filtered():
+    class R:
+        status_code = 200
+        content = (b"<?xml version='1.0'?><rss><channel>"
+                   b"<item><title>Acme Corp wins big order - Reuters</title><link>u1</link>"
+                   b"<pubDate>Wed, 28 Oct 2026 04:00:00 GMT</pubDate><source>Reuters</source></item>"
+                   b"<item><title>Unrelated market wrap - Mint</title><link>u2</link></item>"
+                   b"</channel></rss>")
+
+    class H:
+        calls = []
+
+        def get(self, url, **kw):
+            H.calls.append((url, kw))
+            return R()
+    arts, err = nw.google_news("Acme Corp NSE ACME", http=H())
+    assert err is None and len(arts) == 2 and "when%3A7d" in H.calls[0][0]
+    block, gaps = nw.build_news({"symbol": "ACME", "name": "Acme Corp"}, None, None,
+                                gnews=lambda q: nw.google_news(q, http=H()))
+    assert gaps == [] and block["total"] == 1 and block["recent"][0]["source"] == "google_news"
+    assert block["recent"][0]["published_at"].startswith("2026-10-28")
+
+
+def test_google_news_relevance_handles_concatenated_names():
+    keep = ["TATA STEEL LIMITED", "TATA STEEL LIMITED"]
+    assert nw._match_title("Tata Steel shares jump - Mint", keep)
+    assert nw._match_title("TATASTEEL hits 52-week high", keep)
+    assert not nw._match_title("JSW Steel share price today", keep)      # a different company
+    assert not nw._match_title("Sensex falls 525 points", keep)
+
+
+def test_google_news_failure_is_a_data_gap():
+    class G:
+        def __call__(self, q):
+            return [], "gnews_unreachable"
+    block, gaps = nw.build_news({"symbol": "ACME", "name": "Acme"}, None, None, gnews=G())
+    assert block["total"] == 0 and any("gnews_unreachable" in x for x in gaps)
 
 
 def test_gdelt_failure_is_a_data_gap():

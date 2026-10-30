@@ -38,6 +38,14 @@ def test_parse_master_normalizes_and_skips_derivatives_and_junk():
                    "currency": "INR", "isin": "INE000A01001"}
 
 
+def test_parse_master_accepts_float_strike_marker():
+    # FYERS switched the cash marker from "-1" to "-1.0"; requiring the literal string emptied the catalogue.
+    out = parse_master(MASTER.replace(",-1,XX", ",-1.0,XX"))
+    assert {i["symbol"] for i in out} >= {"TCS", "RELIANCE", "TATAMOTORS", "NIFTYBEES"}
+    assert "FUT" not in " ".join(i["symbol"] for i in out)
+    assert parse_master(MASTER) == out          # both spellings parse identically
+
+
 def test_parse_master_rejects_empty_input():
     with pytest.raises(CatalogueError):
         parse_master("")

@@ -161,26 +161,40 @@ def _extract_json(text):
     return json.loads(text)
 
 
-def build_messages(bundle, facts, news, extra=""):
+def _context(ref):
+    """Non-citable context: the deterministic engine's own 0-100 scores. They are in the prompt (numbers_in keeps
+    0-100 integers) because a judge that names the bull/bear scores would otherwise trip the grounding check."""
+    s = ref["scores"]
+    return {"deterministic_engine": {"note": "internal scores, not citable evidence ids",
+                                     "bull": s["bull"]["score"], "bear": s["bear"]["score"],
+                                     "verdict": ref["verdict"]["verdict"]}}
+
+
+def build_messages(bundle, facts, news, extra="", ref=None):
     payload = {"symbol": bundle["symbol"], "company": bundle["name"], "cap_segment": bundle["cap_segment"],
                "market_session": bundle["market_session"], "data_freshness": bundle["freshness"],
                "facts": [{"id": f["id"], "label": f["label"], "value": f["value"], "unit": f["unit"]} for f in facts],
                "untrusted_news": news, "data_gaps": bundle["data_gaps"],
                "analyst_limitation": bundle["analyst"].get("limitation")}
+    if ref is not None:
+        payload.update(_context(ref))
     user = "Analyse this stock.\n" + json.dumps(payload, ensure_ascii=False) + (("\n" + extra) if extra else "")
     return [{"role": "system", "content": SYSTEM}, {"role": "user", "content": user}]
 
 
-def ground_check(o, facts, news, index):
+def ground_check(o, facts, news, index, own_scores=()):
+    """own_scores: the bull/bear scores this response just returned. Quoting the panel's OWN score is not an invented
+    number, but a score is not market evidence either: it is accepted here and never made a citable id."""
     iss = []
     for k in AGENTS:
         a = o["agents"][k]
-        iss += [f"{k}: {x}" for x in verify_statement(a["point"], a["evidence"], index, facts)]
+        iss += [f"{k}: {x}" for x in verify_statement(a["point"], a["evidence"], index, facts, extra=own_scores)]
     j = o["judge"]
     for txt in (j["rationale"], j["key_catalyst"]):
-        iss += [f"judge: {x}" for x in verify_statement(txt, j["evidence"], index, facts)]
+        iss += [f"judge: {x}" for x in verify_statement(txt, j["evidence"], index, facts, extra=own_scores)]
     iss += [f"news_interpretation: {x}" for x in verify_statement(
-        o.get("news_interpretation", ""), [i for i in re.findall(r"\bN\d+\b", o.get("news_interpretation", ""))], index, facts)]
+        o.get("news_interpretation", ""), [i for i in re.findall(r"\bN\d+\b", o.get("news_interpretation", ""))],
+        index, facts, extra=own_scores)]
     if j["verdict"] == "BUY":
         ev = set(j["evidence"])
         if len(ev) < 2 or not any(i.startswith("E") for i in ev):
@@ -218,11 +232,12 @@ def evaluate(bundle, settings, client=None):
     extra, issues = "", []
     for attempt in range(2):  # at most one corrective re-ask for bad/ungrounded output
         try:
-            text = client.complete(build_messages(bundle, facts, news, extra))
+            text = client.complete(build_messages(bundle, facts, news, extra, ref=ref))
             o = _extract_json(text)
             issues = validate_schema(o)
             if not issues:
-                issues = ground_check(o, facts, news, index)
+                own = (o["agents"]["bull"]["score"], o["agents"]["bear"]["score"])
+                issues = ground_check(o, facts, news, index, own_scores=own)
                 if not issues:
                     return _from_llm(o, bundle, ref, client.model)
                 reason = "grounding_failed"

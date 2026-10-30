@@ -71,7 +71,6 @@ class Settings:
     fyers_app_secret: str
     fyers_redirect_uri: str
     fyers_access_token: str
-    market_data_provider: str
     flask_secret_key: str
     dashboard_access_key: str
     groq_api_key: str
@@ -103,7 +102,6 @@ class Settings:
             fyers_app_secret=_s("FYERS_APP_SECRET"),
             fyers_redirect_uri=_s("FYERS_REDIRECT_URI", "http://127.0.0.1:5000/auth/fyers/callback"),
             fyers_access_token=_s("FYERS_ACCESS_TOKEN"),
-            market_data_provider=_s("MARKET_DATA_PROVIDER", "fyers").lower(),
             flask_secret_key=local_secret("flask_secret", _s("FLASK_SECRET_KEY")),
             dashboard_access_key=local_secret("dashboard_access_key", _s("DASHBOARD_ACCESS_KEY")),
             groq_api_key=_s("GROQ_API_KEY"),
@@ -126,7 +124,7 @@ class Settings:
             groq_timeout=_f("GROQ_TIMEOUT", 60),
             instrument_catalogue_url=_s("INSTRUMENT_CATALOGUE_URL", "https://public.fyers.in/sym_details/NSE_CM.csv"),
             instrument_catalogue_ttl=_i("INSTRUMENT_CATALOGUE_TTL", 21600),  # 6 h; file changes far slower
-            data_dir=Path(_s("DATA_DIR", str(DATA_DIR))),
+            data_dir=Path(_s("DATA_DIR", str(DATA_DIR))).resolve(),
         )
 
     # --- derived, never secret ---

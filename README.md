@@ -54,7 +54,7 @@ in FYERS settings and `.env` (scheme, host, path, no trailing slash differences)
 * **Scout** (Python): one FYERS quotes call for `universe.json`, keeps the top-N movers per bucket (`SHORTLIST_PER_BUCKET`, default 4).
 * **Technician** (FYERS candles): RVOL, 10-day SMA position/trend, ~1-month return, swing levels, 52-week range (from ≤366 daily candles). During open hours RVOL is **time-matched intraday** (5-min bars); if that is impossible it falls back to full-day volume and is **labelled** `…UNADJUSTED` / `full_day_volume…`.
 * **Fundamentalist** (yfinance): analyst consensus, buy/hold/sell mix, mean target and upside. **Only** analyst data: no P/E, ROE or margins, and coverage of small caps is often missing (shown as data gaps).
-* **Newsdesk**: GDELT DOC API (1 request / ~5.5 s) + yfinance headlines; deduped, company-name filtered, prompt-injection-flagged items withheld from the model. **Headline-only**; tone is a transparent keyword heuristic.
+* **Newsdesk**: Yahoo/yfinance headlines, then **Google News RSS** (no key, unthrottled) when those are thin, then GDELT DOC (last resort: it 429s aggressively). Deduped, company-name filtered, prompt-injection-flagged items withheld from the model. **Headline-only**; tone is a transparent keyword heuristic.
 * **Bull / Bear / Judge**: if `GROQ_API_KEY` is set, **one** Groq call per stock (`openai/gpt-oss-120b`, JSON-schema structured output) *role-plays* the panel; it is **not** independent models. Output is validated in Python (schema, evidence IDs, every number traceable to a fact or cited headline, BUY needs ≥2 evidence IDs and momentum/range confirmation, BUY downgraded if the deterministic engine says AVOID). Failure of any kind (bad key, 429, timeout, malformed or ungrounded output) falls back to the deterministic rule engine (`scoring.py`: Bull/Bear 0–100 points; BUY = net ≥ 25 with leadership; AVOID = net ≤ −15; else WATCH). Retries are bounded; a hard rate limit or bad key stops further calls for the run.
 * **Messenger / alert rules (Python, never the model):** BUY, confidence ≥ `CONFIDENCE_THRESHOLD`, quote fresh, market open (scheduled NSE hours; **exchange holidays are not modelled**), validation passed, not synthetic, not already alerted for that symbol today. Closed-market runs display results but send nothing.
 * "Confidence x/10" is an **internal conviction score, not a probability of profit.** The Telegram text follows the specified template exactly, so that label lives in the UI and daily summary.
@@ -62,7 +62,7 @@ in FYERS settings and `.env` (scheme, host, path, no trailing slash differences)
 
 ## 5. Tests (`python -m pytest`) — what they do and do not prove
 96 tests, all with mocked HTTP: OAuth URL/state/exchange/denial/failure/expiry, token-file permissions, tunnel lock/unlock/CSRF/host checks, secret redaction, FYERS client parsing/errors/rate limiter, Groq retry/circuit/validation/grounding/downgrade, Telegram template/escaping/dedupe/token non-leak, offline demo, end-to-end live path with fake providers, symbol-master parsing/ranking/cache TTL/stale fallback, search API bounds and hostile input, spoofed-instrument rejection, focused runs (one target, scope tagging, no Telegram, data-gap degradation), and a source scan proving no order endpoints.
-**Not tested (no credentials/network here): any live call to FYERS, Groq, Telegram, GDELT, yfinance or to `public.fyers.in` for the symbol master.** The search UI was exercised in a headless Chrome against a local symbol-master file and fake providers; the real master download, its current column layout and the `-EQ` quote/candle calls for a searched symbol remain **unverified** until you run them. Treat live integration as **unverified** until you run it. In particular unverified: FYERS acceptance of your tunnel redirect URL, FYERS symbol names in `universe.json` (`NSE:<SYM>-EQ`; check the symbol master), Groq strict-schema acceptance for your key/model (the client degrades to `json_object` on a 400 and still validates), and current yfinance field names (all reads are null-safe).
+**Verified against the live internet on 2026-10-29:** the FYERS symbol master (2,724 cash instruments, strike column now `-1.0`), yfinance analyst data for NSE tickers, Google News RSS headlines, and the LLM grounding path with a fake Groq reply. **Still not tested: any live call to FYERS quotes/candles, the real Groq API, Telegram, or a GDELT success** (GDELT was returning 429 page-wide during that check). The search UI was exercised in a headless Chrome against a local symbol-master file and fake providers; the real master download, its current column layout and the `-EQ` quote/candle calls for a searched symbol remain **unverified** until you run them. Treat live integration as **unverified** until you run it. In particular unverified: FYERS acceptance of your tunnel redirect URL, FYERS symbol names in `universe.json` (`NSE:<SYM>-EQ`; check the symbol master), Groq strict-schema acceptance for your key/model (the client degrades to `json_object` on a 400 and still validates), and current yfinance field names (all reads are null-safe).
 
 ## 5b. Search & select (focused analysis)
 * **Where the list comes from:** the FYERS public NSE cash-market symbol master (`INSTRUMENT_CATALOGUE_URL`, default
@@ -70,8 +70,9 @@ in FYERS settings and `.env` (scheme, host, path, no trailing slash differences)
   background thread and parsed in memory; **every keystroke is answered locally** — a search never calls FYERS. If a refresh
   fails, the last valid copy keeps serving and results are labelled as cached.
 * The master is headerless; the parser reads name (col 1), ISIN (5), provider symbol (9), short symbol (13) and strike (15),
-  keeps cash instruments only (`-1` strike, `NSE:…-EQ` symbol) and **drops malformed rows instead of guessing**. This column
-  layout comes from FYERS community posts, not a versioned spec — verify it against the live file after a schema change.
+  keeps cash instruments only (strike marker `-1` **or** `-1.0` — FYERS changed it to the float form, which silently
+  emptied the catalogue until it was accepted — and an `NSE:…-EQ` symbol) and **drops malformed rows instead of guessing**.
+  This column layout comes from FYERS community posts, not a versioned spec — verify it against the live file after a schema change.
 * Only `NSE:<SYMBOL>-EQ` cash instruments are searchable, and an IPO becomes searchable once it appears in a refreshed master.
   Upcoming/unlisted IPOs have no quote or price history and are out of scope. The master carries no reliable ETF flag, so
   every hit is labelled `EQUITY`; analyst data for ETFs is usually reported as a gap.
@@ -94,7 +95,9 @@ in FYERS settings and `.env` (scheme, host, path, no trailing slash differences)
 | Status "Expired" | Daily token expiry. Click Reconnect. |
 | Focused run: "That instrument is not in the current NSE symbol list" | The cached master is empty/stale after a failed refresh. Restart the app or wait for the next refresh. |
 | Live run: "rate limit" | Wait for the minute window; lower `SHORTLIST_PER_BUCKET`. |
-| Many `analyst.*` / `news.*` gaps | yfinance/GDELT had no coverage or were throttled. Shown honestly, not filled. |
+| Many `analyst.*` / `news.*` gaps | yfinance/Google News/GDELT had no coverage or were throttled. Shown honestly, not filled. |
+| LLM fallback `grounding_failed` naming a number like `10` | A number the model stated was not in any cited fact/headline. Bull/Bear scores are now sent as prompt context and accepted for *its own* scores only; other untraceable numbers are still rejected after one corrective retry. |
+| Bull/Bear/Judge always fall back | Check the warning: `no_api_key`, `auth_error`, `rate_limited`, `invalid_output` or `grounding_failed`. Each names the exact gate that failed. |
 | Search says "Symbol list is temporarily unavailable" | The symbol master could not be downloaded and nothing was cached. Check the server log and network access to `public.fyers.in`. |
 | Focused run: "No verified yfinance listing" | The instrument is not a plain `-EQ` equity (e.g. ETF series). Analyst fields are shown as gaps. |
 

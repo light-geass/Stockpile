@@ -2,7 +2,7 @@ import requests
 
 from notifier import FOOTER, Telegram, format_buy, format_summary
 from storage import Store
-from tests.conftest import FakeHTTP, Resp
+from tests.conftest import FakeHTTP, Resp, rows
 from tests.test_llm import live_bundle
 import llm, config
 
@@ -74,4 +74,4 @@ def test_audit_rows_are_scrubbed(tmp_path):
     b = live_bundle()
     b["note"] = "leaked SECRETXYZ123 here"
     st.add_verdict(1, b, {"verdict": {"verdict": "WATCH", "confidence": 5}, "engine": "deterministic", "validation": {}}, {"eligible": False, "blocked_reasons": []})
-    assert "SECRETXYZ123" not in st.rows("SELECT bundle FROM verdicts")[0][0]
+    assert "SECRETXYZ123" not in rows(st, "SELECT bundle FROM verdicts")[0][0]

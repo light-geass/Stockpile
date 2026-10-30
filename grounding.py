@@ -83,20 +83,30 @@ def _match(num, nd, allowed):
     return False
 
 
-def verify_statement(text, cited_ids, index, facts):
+def verify_statement(text, cited_ids, index, facts, extra=()):
     """Every number in `text` must trace to a fact value, a cited headline's own numbers, or a structural constant.
-    Every cited ID must exist. Returns list of issue strings."""
+    `extra` is for numbers the caller itself supplied (e.g. the panel's own bull/bear scores); they are accepted
+    at exact value only — never rounded — so this cannot be used to smuggle in an approximation. Every cited ID
+    must exist. Returns list of issue strings."""
     issues = []
     for i in cited_ids:
         if i not in index:
             issues.append(f"unknown evidence id {i}")
     allowed = {float(f["value"]) for f in facts if isinstance(f["value"], (int, float)) and not isinstance(f["value"], bool)}
     allowed |= STRUCTURAL
+    exact = set()
+    for v in (extra or ()):
+        try:
+            exact.add(float(v))
+        except (TypeError, ValueError):
+            pass
     for i in cited_ids:
         it = index.get(i)
         if it and "title" in it:
             allowed |= {n for n, _ in numbers_in(it["title"])}
     for num, nd in numbers_in(text):
+        if num in exact and nd == 0:
+            continue
         if not _match(num, nd, allowed):
             issues.append(f"untraceable number {num:g}")
     return issues

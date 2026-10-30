@@ -68,7 +68,3 @@ class Store:
             self.db.execute("INSERT INTO alerts(run_id,symbol,dedupe_key,status,error,created_at) VALUES(?,?,?,?,?,?)",
                             (run_id, symbol, key, status, scrub_obj(error, self.secrets), _now()))
             self.db.commit()
-
-    def rows(self, sql, args=()):
-        with self.lock:
-            return self.db.execute(sql, args).fetchall()

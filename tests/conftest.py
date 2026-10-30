@@ -72,3 +72,9 @@ def tunnel_env():
 
 def unlock(client, key="open-sesame-key"):
     return client.post("/unlock", data={"key": key}, base_url=HTTPS)
+
+
+def rows(store, sql):
+    """Read the audit DB directly (the app itself never exposes SQL)."""
+    with store.lock:
+        return store.db.execute(sql).fetchall()

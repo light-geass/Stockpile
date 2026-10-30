@@ -38,6 +38,7 @@ class Pipeline:
         self.deps = deps or {}
         self.lock = threading.Lock()
         self.running = False
+        self._yf_map = {}
         self._reset()
 
     # ---------- state ----------
@@ -153,14 +154,66 @@ class Pipeline:
                 raise RunAbort(e.message)
             raise
 
-    def _collect_live(self):
-        if self.s.market_data_provider != "fyers":
-            raise RunAbort(f"Market data provider '{self.s.market_data_provider}' is not implemented. Use fyers.")
+    # ---------- shared agent stages (universe scan and focused run use the same code) ----------
+    def _provider(self):
         if not self.auth.get_token():
             self._agent("scout", "error")
             raise RunAbort("FYERS is not connected. Open the dashboard through your HTTPS tunnel and click Connect FYERS.")
-        provider = self._fyers()
-        self._provider = provider
+        return self._fyers()
+
+    def _technicals(self, provider, entries, quotes, session):
+        self._agent("technician", "working")
+        out = {}
+        for e in entries:
+            try:
+                daily = self._fyers_call(provider.daily_candles, e["fyers"])
+                intra = self._fyers_call(provider.intraday_candles, e["fyers"]) if session == "open" else None
+                out[e["symbol"]] = ev.technicals_from_daily(daily, quotes[e["fyers"]], intra, session)
+            except FyersError as err:  # _fyers_call already re-raised rate limits/auth as RunAbort
+                out[e["symbol"]] = (None, None, [f"technicals({err.kind})"])
+        rv = [t[0]["rvol"] for t in out.values() if t[0] and t[0].get("rvol")]
+        self._agent("technician", "done", analyzed=len(out),
+                    **{"avg RVOL" if len(out) > 1 else "RVOL": f"{sum(rv) / len(rv):.2f}x" if rv else "n/a"})
+        return out
+
+    def _fundamentals(self, entries, quotes, focused=False):
+        """yfinance analyst data. Focused runs never guess a ticker: an unmapped series becomes a data gap."""
+        self._agent("fundamentalist", "working")
+        out, yf_map = {}, {}
+        for e in entries:
+            yf_map[e["symbol"]] = ds.yf_symbol_for(e["fyers"]) if focused else e["yf"]
+            sym = yf_map[e["symbol"]]
+            out[e["symbol"]] = (ds.fetch_fundamentals(sym, self.deps.get("yf")) if sym else
+                                 (ev.empty_analyst("not_mapped"), {}, ["analyst.not_mapped"], None))
+        ups = [a["target_mean"] / quotes[e["fyers"]]["live"] * 100 - 100 for e in entries
+               for a in [out[e["symbol"]][0]] if a.get("target_mean") and quotes[e["fyers"]].get("live")]
+        cov = sum(1 for a, *_ in out.values()
+                  if a.get("target_mean") or a.get("consensus") or a.get("buy_pct") is not None)
+        self._agent("fundamentalist", "done", covered=f"{cov}/{len(entries)}",
+                    **{"avg upside": f"{sum(ups) / len(ups):+.1f}%" if ups else "n/a"})
+        self._yf_map = yf_map
+        return out
+
+    def _news(self, entries, fundamentals):
+        self._agent("newsdesk", "working")
+        gd = self.deps.get("gdelt") or newsmod.Gdelt(self.s.gdelt_min_interval)
+        gn = self.deps.get("gnews", newsmod.google_news)
+        out = {e["symbol"]: newsmod.build_news(e, gd, fundamentals[e["symbol"]][3], gnews=gn) for e in entries}
+        self._agent("newsdesk", "done", headlines=sum(n[0]["total"] for n in out.values()),
+                    tone=f"{sum(n[0]['positive'] for n in out.values())}+ / {sum(n[0]['negative'] for n in out.values())}-")
+        return out
+
+    def _warn_market(self, session, bundles):
+        stale = [b["symbol"] for b in bundles if b["freshness"] == "stale"]
+        if stale:
+            ages = sorted(b["quote_age_sec"] for b in bundles if b.get("quote_age_sec") is not None)
+            self._warn(f"{len(stale)} quotes are older than {self.s.quote_max_age_sec}s while the market is scheduled open "
+                       f"(median age {ages[len(ages)//2] if ages else '?'}s). Check your PC clock sync; alerts are blocked for stale quotes.")
+        if session != "open":
+            self._warn("Market is closed (scheduled NSE hours; holidays not modelled): data is last-session, so no alerts fire.")
+
+    def _collect_live(self):
+        provider = self._provider()
         universe = ds.load_universe()
         self._agent("scout", "working")
         quotes = self._fyers_call(provider.quotes, [e["fyers"] for e in universe])
@@ -173,79 +226,27 @@ class Pipeline:
         if not short:
             raise RunAbort("No stocks passed the Scout screen (no valid quotes).")
         session = ev.market_session()
-        # Technician
-        self._agent("technician", "working")
-        tech = {}
-        for e in short:
-            q = quotes[e["fyers"]]
-            try:
-                daily = self._fyers_call(provider.daily_candles, e["fyers"])
-                intra = self._fyers_call(provider.intraday_candles, e["fyers"]) if session == "open" else None
-                tech[e["symbol"]] = ev.technicals_from_daily(daily, q, intra, session)
-            except FyersError as err:  # note: _fyers_call already re-raises rate limits/auth as RunAbort
-                tech[e["symbol"]] = (None, None, [f"technicals({err.kind})"])
-        rv = [t[0]["rvol"] for t in tech.values() if t[0] and t[0].get("rvol")]
-        self._agent("technician", "done", analyzed=len(tech), **{"avg RVOL": f"{sum(rv) / len(rv):.2f}x" if rv else "n/a"})
-        # Fundamentalist
-        self._agent("fundamentalist", "working")
-        fund = {}
-        for e in short:
-            fund[e["symbol"]] = ds.fetch_fundamentals(e["yf"], self.deps.get("yf"))
-        covered = sum(1 for a, *_ in fund.values() if a.get("target_mean") or a.get("consensus"))
-        ups = [a["target_mean"] / quotes[e["fyers"]]["live"] * 100 - 100 for e in short
-               for a in [fund[e["symbol"]][0]] if a.get("target_mean") and quotes[e["fyers"]].get("live")]
-        self._agent("fundamentalist", "done", covered=f"{covered}/{len(short)}",
-                    **{"avg upside": f"{sum(ups) / len(ups):+.1f}%" if ups else "n/a"})
-        # Newsdesk
-        self._agent("newsdesk", "working")
-        gd = self.deps.get("gdelt") or newsmod.Gdelt(self.s.gdelt_min_interval)
-        nws, total = {}, 0
-        for e in short:
-            nws[e["symbol"]] = newsmod.build_news(e, gd, fund[e["symbol"]][3])
-            total += nws[e["symbol"]][0]["total"]
-        pos = sum(n[0]["positive"] for n in nws.values())
-        neg = sum(n[0]["negative"] for n in nws.values())
-        self._agent("newsdesk", "done", headlines=total, tone=f"{pos}+ / {neg}-")
-        bundles = []
-        for e in short:
-            t, rng, tg = tech[e["symbol"]]
-            an, meta, fg, _ = fund[e["symbol"]]
-            nb, ng = nws[e["symbol"]]
-            if t is None:
-                t, rng = {"rvol": None, "rvol_method": None, "price_vs_sma_pct": None, "sma_period": 10,
-                          "window_return_pct": None, "swing_high": None, "swing_low": None,
-                          "day_range_position_pct": None, "trend": None}, {"high": None, "low": None, "pct_from_high": None,
-                                                                         "position_pct": None, "basis": "unavailable"}
-            src = {"price": "fyers", "candles": "fyers", "analyst": "yfinance", "news": "gdelt+yfinance"}
-            bundles.append(ev.assemble_bundle(e, quotes[e["fyers"]], t, rng, an, nb, src, retrieved,
-                                              tg + fg + ng, max_age=self.s.quote_max_age_sec, session=session))
-        stale = [b["symbol"] for b in bundles if b["freshness"] == "stale"]
-        if stale:
-            ages = sorted(b["quote_age_sec"] for b in bundles if b.get("quote_age_sec") is not None)
-            self._warn(f"{len(stale)} quotes are older than {self.s.quote_max_age_sec}s while the market is scheduled open "
-                       f"(median age {ages[len(ages)//2] if ages else '?'}s). Check your PC clock sync; alerts are blocked for stale quotes.")
-        if session != "open":
-            self._warn("Market is closed (scheduled NSE hours; holidays not modelled): data is last-session, so no alerts fire.")
+        tech = self._technicals(provider, short, quotes, session)
+        fund = self._fundamentals(short, quotes)
+        nws = self._news(short, fund)
+        bundles = [self._bundle(e, quotes[e["fyers"]], tech[e["symbol"]], fund[e["symbol"]], nws[e["symbol"]],
+                                self._yf_map[e["symbol"]], retrieved, session) for e in short]
+        self._warn_market(session, bundles)
         return bundles, len(universe)
 
     # ---------- focused (search & select) ----------
     def _collect_focused(self, target):
         """One selected instrument, no Scout screening. Returns ([bundle], 1)."""
-        if self.s.market_data_provider != "fyers":
-            raise RunAbort(f"Market data provider '{self.s.market_data_provider}' is not implemented. Use fyers.")
-        if not self.auth.get_token():
-            self._agent("scout", "error")
-            raise RunAbort("FYERS is not connected. Open the dashboard through your HTTPS tunnel and click Connect FYERS.")
-        provider = self._fyers()
-        self._provider = provider
+        provider = self._provider()
         self._agent("scout", "working")
         quotes = self._fyers_call(provider.quotes, [target["provider_symbol"]])
         q = quotes.get(target["provider_symbol"])
         # Prefer the series FYERS actually returned (it also covers -EQ/-BE/-ETF, which the request does not).
-        provider_symbol = q.get("symbol") if q and q.get("symbol") else target["provider_symbol"]
-        entry = {"symbol": target["symbol"], "name": target.get("name") or target["symbol"],
-                 "sector": None, "cap_segment": "Selected", "asset_type": target.get("asset_type"),
-                 "fyers": provider_symbol, "news_query": target.get("name") or target["symbol"]}
+        entry = {"symbol": target["symbol"], "name": target.get("name") or target["symbol"], "sector": None,
+                 "cap_segment": "Selected", "asset_type": target.get("asset_type"),
+                 "fyers": (q or {}).get("symbol") or target["provider_symbol"],
+                 "news_query": target.get("name") or target["symbol"]}
+        quotes = {entry["fyers"]: q or {}}
         if not q or q.get("live") is None:
             self._agent("scout", "error")
             raise RunAbort(f"FYERS returned no live quote for {entry['symbol']} ({entry['fyers']}).")
@@ -253,47 +254,30 @@ class Pipeline:
         self._agent("scout", "done", scanned=1, selected=entry["symbol"])
         self._set(pulled_at=ev.now_ist().strftime("%d %b %Y, %H:%M IST"), message="Focused analysis in progress.")
         session = ev.market_session()
-        # Technician
-        self._agent("technician", "working")
-        try:
-            daily = self._fyers_call(provider.daily_candles, entry["fyers"])
-            intra = self._fyers_call(provider.intraday_candles, entry["fyers"]) if session == "open" else None
-            t, rng, tg = ev.technicals_from_daily(daily, q, intra, session)
-        except FyersError as err:
-            t, rng, tg = None, None, [f"technicals({err.kind})"]
-        self._agent("technician", "done", analyzed=1, **{"RVOL": f"{t['rvol']:.2f}x" if t and t.get("rvol") else "n/a"})
-        # Fundamentalist — only fetch when the FYERS symbol maps to a known yfinance ticker; never guess
-        self._agent("fundamentalist", "working")
-        yf_sym = ds.yf_symbol_for(entry["fyers"])
-        if yf_sym:
-            an, _meta, fg, yf_ticker = ds.fetch_fundamentals(yf_sym, self.deps.get("yf"))
-        else:
-            an, fg, yf_ticker = ev.empty_analyst("not_mapped"), ["analyst.not_mapped"], None
-        self._agent("fundamentalist", "done", covered=("1/1" if an.get("target_mean") or an.get("consensus") else "0/1"),
-                    **{"avg upside": (f"{an['target_mean'] / q['live'] * 100 - 100:+.1f}%"
-                                      if an.get("target_mean") and q.get("live") else "n/a")})
-        # Newsdesk
-        self._agent("newsdesk", "working")
-        gd = self.deps.get("gdelt") or newsmod.Gdelt(self.s.gdelt_min_interval)
-        nb, ng = newsmod.build_news(entry, gd, yf_ticker)
-        self._agent("newsdesk", "done", headlines=nb["total"], tone=f"{nb['positive']}+ / {nb['negative']}-")
-        if t is None:
-            t, rng = {"rvol": None, "rvol_method": None, "price_vs_sma_pct": None, "sma_period": 10,
-                      "window_return_pct": None, "swing_high": None, "swing_low": None,
-                      "day_range_position_pct": None, "trend": None}, {"high": None, "low": None, "pct_from_high": None,
-                                                                     "position_pct": None, "basis": "unavailable"}
-        src = {"price": "fyers", "candles": "fyers", "analyst": "yfinance" if yf_sym else "unavailable",
-               "news": "gdelt+yfinance" if yf_ticker is not None else "gdelt"}
-        bundle = ev.assemble_bundle(entry, q, t, rng, an, nb, src, retrieved, list(tg or []) + list(fg) + list(ng),
-                                    max_age=self.s.quote_max_age_sec, session=session)
-        if bundle["freshness"] == "stale":
-            self._warn(f"The quote is older than {self.s.quote_max_age_sec}s while the market is scheduled open."
-                       if bundle["market_session"] == "open" else "Market is closed: data is last-session.")
-        if session != "open":
-            self._warn("Market is closed (scheduled NSE hours; holidays not modelled): data is last-session, so no alerts fire.")
-        if yf_sym is None:
+        tech = self._technicals(provider, [entry], quotes, session)
+        fund = self._fundamentals([entry], quotes, focused=True)
+        nws = self._news([entry], fund)
+        bundle = self._bundle(entry, q, tech[entry["symbol"]], fund[entry["symbol"]], nws[entry["symbol"]],
+                              self._yf_map[entry["symbol"]], retrieved, session)
+        self._warn_market(session, [bundle])
+        if self._yf_map[entry["symbol"]] is None:
             self._warn("No verified yfinance listing for this instrument: analyst data is reported as a gap, not guessed.")
         return [bundle], 1
+
+    def _bundle(self, entry, quote, tech, fund, news_block, yf_sym, retrieved, session):
+        """Assemble one evidence bundle; a failed Technician slot degrades to explicit nulls, never an exception.
+        yf_sym is the verified yfinance ticker (None = not mapped); `source` still names the configured feed."""
+        t, rng, tg = tech
+        if t is None:
+            t = {"rvol": None, "rvol_method": None, "price_vs_sma_pct": None, "sma_period": 10, "window_return_pct": None,
+                 "swing_high": None, "swing_low": None, "day_range_position_pct": None, "trend": None}
+            rng = {"high": None, "low": None, "pct_from_high": None, "position_pct": None, "basis": "unavailable"}
+        an, _meta, fg, _ticker = fund
+        nb, ng = news_block
+        src = {"price": "fyers", "candles": "fyers", "analyst": "yfinance",
+               "news": "google_news+yfinance+gdelt" if yf_sym else "google_news+gdelt"}
+        return ev.assemble_bundle(entry, quote, t, rng, an, nb, src, retrieved, list(tg or []) + list(fg) + list(ng),
+                                 max_age=self.s.quote_max_age_sec, session=session)
 
     def _record_focused(self, bundles, run_id):
         """Persist the verdict for the audit trail. Focused runs never send Telegram in v1."""

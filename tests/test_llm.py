@@ -116,6 +116,33 @@ def test_invented_number_fails_grounding(mk):
     assert not llm.alert_eligibility(b, r, s)["eligible"]
 
 
+def test_panel_scores_are_prompt_context_and_not_grounding_failures(mk):
+    """Regression: 'ITC: LLM fallback to deterministic engine (grounding_failed). bull: untraceable number 10'.
+    Bull/Bear scores are the panel's own output, so quoting them must not fail; they must never be citable ids."""
+    _, s = mk()
+    b = live_bundle("ITC")
+    p = good_payload(b)
+    p["agents"]["bull"]["point"] = "Bull case scores 70 against a bear score of 10, with RVOL 2.4x."
+    p["judge"]["rationale"] = "Bull 70 beats bear 10; volume of 2.4x confirms."
+    c, http = mkclient([ok_resp(p)])
+    r = llm.evaluate(b, s, c)
+    assert r["engine"] == "groq" and r["fallback_reason"] is None, r["validation"]
+    sent = http.calls[0][2]["json"]["messages"][1]["content"]
+    assert "deterministic_engine" in sent and '"bull": 70' not in sent  # engine's own scores, not the panel's
+    facts, _, index = build_facts(b)
+    assert all("score" not in f["path"] for f in facts)  # scores are not evidence
+
+
+def test_invented_number_still_fails_when_scores_are_present(mk):
+    _, s = mk()
+    b = live_bundle()
+    bad = good_payload(b, extra_text=" and revenue grew 37.4%")
+    bad["agents"]["bull"]["point"] += " Bull scores 70."
+    c, _ = mkclient([ok_resp(bad), ok_resp(bad)])
+    r = llm.evaluate(b, s, c)
+    assert r["fallback_reason"] == "grounding_failed" and any("37.4" in i for i in r["validation"]["issues"])
+
+
 def test_unknown_evidence_id_and_thin_buy_rejected(mk):
     _, s = mk()
     b = live_bundle()

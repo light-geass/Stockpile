@@ -17,7 +17,8 @@ from markupsafe import escape
 
 import config
 from fyers_auth import AuthError, FyersAuth, TokenStore
-from instrument_search import CatalogueError, InstrumentCatalogue
+from instrument_search import (CatalogueError, InstrumentCatalogue, MAX_QUERY as SEARCH_MAX_QUERY,
+                               MIN_QUERY as SEARCH_MIN_QUERY)
 from pipeline import Pipeline
 from security import install_log_redaction, redact
 from storage import Store
@@ -25,8 +26,8 @@ from storage import Store
 log = logging.getLogger("app")
 BASE = Path(__file__).resolve().parent
 PUBLIC_ENDPOINTS = {"healthz", "fyers_callback", "unlock"}
-SEARCH_MIN_QUERY, SEARCH_MAX_QUERY = 2, 40  # same bounds the catalogue enforces
 FWD_HEADERS = ("X-Forwarded-For", "X-Forwarded-Host", "X-Forwarded-Proto", "Forwarded")
+# ?auth=<kind> on return from the OAuth callback, rendered by the dashboard through /api/auth-notice/<kind>.
 AUTH_NOTICES = {
     "ok": ("good", "FYERS connected. Token stored locally on the server."),
     "denied": ("warn", "FYERS login was cancelled or denied."),

@@ -7,7 +7,7 @@ import pytest
 import evidence as ev
 import data_sources as ds
 from fyers_client import FyersError
-from tests.conftest import FakeHTTP
+from tests.conftest import FakeHTTP, rows as db_rows
 
 IST = ev.IST
 
@@ -142,6 +142,27 @@ def test_yfinance_failure_degrades_to_data_gaps(mk, monkeypatch):
     assert st["status"] == "done" and all(any("analyst" in g for g in v["gaps"]) for v in st["verdicts"])
 
 
+def test_fundamentals_nan_and_empty_info_are_reported_not_leaked():
+    nan = float("nan")
+
+    class NanYF:
+        class Ticker:
+            def __init__(self, s):
+                self.recommendations = None
+                self.info = {"recommendationKey": "buy", "numberOfAnalystOpinions": nan,
+                             "targetMeanPrice": nan, "targetLowPrice": None, "targetHighPrice": nan}
+
+    class EmptyYF:
+        class Ticker:
+            def __init__(self, s):
+                self.recommendations = None
+                self.info = {}
+    an, meta, gaps, tk = ds.fetch_fundamentals("ITC.NS", NanYF)
+    assert an["target_mean"] is None and an["num_analysts"] is None and an["consensus"] == "buy"
+    an2, _, gaps2, _ = ds.fetch_fundamentals("ITC.NS", EmptyYF)
+    assert "analyst.yfinance_empty" in gaps2 and an2["target_mean"] is None
+
+
 def test_agent_order_preserved_in_api(mk):
     from tests.conftest import LOCAL
     app, _ = mk()
@@ -176,14 +197,14 @@ def test_focused_run_analyses_only_the_selected_instrument_without_alerts(mk, mo
     assert "not from universe.json" in st["footer"]["text"]
     assert tg.sent == []                                   # focused runs never message Telegram
     assert st["verdicts"][0]["alert"]["status"] == "skipped"
-    assert app.extensions["store"].rows("SELECT COUNT(*) FROM verdicts")[0][0] == 1
+    assert db_rows(app.extensions["store"], "SELECT COUNT(*) FROM verdicts")[0][0] == 1
 
 
 def test_focused_run_is_recorded_with_its_scope(mk):
     app, _ = mk(live_env(), {"fyers": FakeProvider(), "gdelt": FakeGdelt(), "yf": FakeYF})
     app.extensions["pipeline"].run("live", dict(FOCUSED))
     import json
-    mode, summary = app.extensions["store"].rows("SELECT mode, summary FROM runs")[-1]
+    mode, summary = db_rows(app.extensions["store"], "SELECT mode, summary FROM runs")[-1]
     assert mode == "focused"
     meta = json.loads(summary)
     assert meta["scope"] == "focused" and meta["target"]["symbol"] == "NIFTYBEES"
