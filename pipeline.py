@@ -101,10 +101,13 @@ class Pipeline:
         scope = "focused" if focused else "universe"
         brief = ({k: target.get(k) for k in ("symbol", "name", "exchange", "asset_type", "provider_symbol")}
                  if focused else None)
+        # Mark running and flip the state in ONE critical section: start() has already set running=True on the
+        # caller's thread, so a fast run could otherwise clear it before the state said "running" (a poller then
+        # saw running=False with status='running' for ever).
+        self._reset(scope, brief)
         with self.lock:
             self.running = True
-        self._reset(scope, brief)
-        self._set(status="running", mode="live", message="Run started.")
+            self.state.update(status="running", mode="live", message="Run started.")
         run_id = self.store.start_run(scope)
         engine_label, uni_n, short_n, summary = None, 0, 0, {}
         try:
@@ -119,10 +122,11 @@ class Pipeline:
             self._finish(bundles, uni_n)
             self._set(status="done", message="Focused analysis complete." if focused else "Run complete.")
         except RunAbort as e:
-            self._set(status="error", message=redact(str(e), self.s.secret_values()))
-            for k, a in self.state["agents"].items():
-                if a["status"] == "working":
-                    a["status"] = "error"
+            with self.lock:
+                self.state.update(status="error", message=redact(str(e), self.s.secret_values()))
+                for a in self.state["agents"].values():
+                    if a["status"] == "working":
+                        a["status"] = "error"
         except Exception as e:  # last-resort guard: a bug must never kill the server
             log.error("run crashed: %s", redact(f"{type(e).__name__}: {e}", self.s.secret_values()))
             self._set(status="error", message="Run failed unexpectedly. Check the server log.")

@@ -6,6 +6,7 @@ Security model:
   * /auth/fyers/callback is intentionally reachable publicly but is useless without a matching, single-use, 10-min OAuth state."""
 import hmac
 import logging
+import os
 import secrets
 import threading
 import time
@@ -38,6 +39,19 @@ AUTH_NOTICES = {
 }
 
 
+def _route_yfinance_proxy(s):
+    """Yahoo blocks datacentre IPs (Render included) on its ``.info`` endpoint, which silently starved the
+    Fundamentalist. yfinance honours these variables, so point it at a residential proxy when one is configured.
+    Nothing is set unless the operator provides it: behaviour is unchanged without a proxy."""
+    for k in ("YFINANCE_PROXY", "PROXY_URL"):
+        v = os.environ.get(k, "").strip()
+        if v:
+            os.environ.setdefault("HTTP_PROXY", v)
+            os.environ.setdefault("HTTPS_PROXY", v)
+            logging.getLogger("app").info("Yahoo/yfinance requests routed through a proxy (%s)", k)
+            return
+
+
 class HostAwareSessionInterface(SecureCookieSessionInterface):
     """Secure cookie flag per request: True on the HTTPS tunnel host, False on plain loopback (browsers drop Secure cookies there)."""
 
@@ -48,6 +62,7 @@ class HostAwareSessionInterface(SecureCookieSessionInterface):
 
 def create_app(settings=None, deps=None, store_path=None):
     s = settings or config.Settings.from_env()
+    _route_yfinance_proxy(s)
     app = Flask(__name__)
     app.config.update(SETTINGS=s, SECRET_KEY=s.flask_secret_key, SESSION_COOKIE_HTTPONLY=True,
                       SESSION_COOKIE_SAMESITE="Lax", SESSION_COOKIE_NAME="sd_session",

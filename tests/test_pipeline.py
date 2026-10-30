@@ -199,6 +199,46 @@ def test_focused_run_for_a_covered_stock_reports_coverage(mk, monkeypatch):
     assert "analyst.buy_pct" in gaps
 
 
+def test_fundamentals_survive_a_blocked_info_endpoint():
+    """The deployed failing case: `.info` is empty/raises on a throttled cloud IP while the report endpoints work.
+    Before the fallback this reported 'Covered 0/1' for TCS, which is covered by dozens of analysts."""
+    class Blocked:
+        class Ticker:
+            def __init__(self, s):
+                self.recommendations = None
+            @property
+            def info(self):
+                raise ValueError("empty info")
+            @property
+            def recommendations_summary(self):
+                raise RuntimeError("no summary")
+            @property
+            def analyst_price_targets(self):
+                return {"current": 2502.6, "high": 3266.0, "low": 1840.0, "mean": 2398.0}
+    an, meta, gaps, _ = ds.fetch_fundamentals("TCS.NS", Blocked)
+    assert ds.analyst_covered(an) and an["_reason"] == "fetched"
+    assert an["target_mean"] == 2398.0 and an["target_low"] == 1840.0
+    assert "analyst.yfinance_empty" not in gaps
+
+
+class _EmptyTicker:
+    recommendations = None
+    info = {}
+    recommendations_summary = None
+    analyst_price_targets = {}
+    def __init__(self, s):
+        pass
+
+
+def test_fully_blocked_yahoo_is_not_reported_as_no_coverage():
+    """'No analyst data' and 'Yahoo gave this server nothing' must not be confused in the UI."""
+    class Blocked:
+        Ticker = _EmptyTicker
+    an, _, gaps, _ = ds.fetch_fundamentals("TCS.NS", Blocked)
+    assert an["_reason"] == "yfinance_empty" and not ds.analyst_covered(an)
+    assert "analyst.yfinance_empty" in gaps and "analyst.no_coverage" not in gaps
+
+
 def test_no_analyst_coverage_is_explained_not_silent():
     """Regression: a small cap showed 'Covered 0/1' with an EMPTY gap list, which looks like a bug.
     Yahoo returning no consensus/target is 'not covered' and must say so."""
@@ -211,6 +251,21 @@ def test_no_analyst_coverage_is_explained_not_silent():
     assert an["_reason"] == "no_analyst_coverage" and "analyst.no_coverage" in gaps
     assert ds.analyst_covered(an) is False and ds.analyst_covered({**an, "buy_pct": 50.0}) is True
     assert meta["name"] == "ITI Ltd"
+
+
+def test_yfinance_proxy_is_opt_in(monkeypatch):
+    """Without a proxy nothing is exported; with one, yfinance's HTTP(S)_PROXY variables are set."""
+    import app as appmod
+    for k in ("YFINANCE_PROXY", "PROXY_URL", "HTTP_PROXY", "HTTPS_PROXY"):
+        monkeypatch.delenv(k, raising=False)
+    appmod._route_yfinance_proxy(object())
+    assert "HTTP_PROXY" not in __import__("os").environ
+    monkeypatch.setenv("YFINANCE_PROXY", "http://user:pass@10.0.0.1:8080")
+    appmod._route_yfinance_proxy(object())
+    import os
+    assert os.environ["HTTPS_PROXY"] == "http://user:pass@10.0.0.1:8080"
+    for k in ("HTTP_PROXY", "HTTPS_PROXY"):  # do not leak the dead proxy into other tests
+        monkeypatch.delenv(k, raising=False)
 
 
 def test_agent_order_preserved_in_api(mk):
@@ -334,12 +389,15 @@ def test_analyze_selected_api_starts_a_focused_run_and_status_reports_scope(mk):
     assert r.status_code == 202 and r.json["scope"] == "focused"
     assert r.json["target"]["provider_symbol"] == "NSE:NIFTYBEES-EQ"
     p = app.extensions["pipeline"]
-    for _ in range(200):
-        if not p.running:
+    # The run is on a thread; wait for its RESULT, not just for running=False (that flag is cleared in the
+    # worker's finally block, so it can still be True before the thread has started).
+    for _ in range(2000):
+        if not p.running and p.state["status"] != "running":
             break
         time.sleep(0.02)
     st = c.get("/api/status", base_url=LOCAL).json
     assert st["scope"] == "focused" and st["target"]["symbol"] == "NIFTYBEES"
+    assert st["status"] == "done", st.get("message")
     assert [v["symbol"] for v in st["verdicts"]] == ["NIFTYBEES"] and tg.sent == []
 
 

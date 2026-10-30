@@ -154,7 +154,8 @@ function renderAgents(a,focused=false){const g=$('#agents');g.replaceChildren(..
 function chip(t){return h('span',{class:'chip'},t)}
 function noAnalyst(r){return {'no_analyst_coverage':'No analyst coverage: Yahoo lists no consensus or target for this instrument.',
  'not_mapped':'Not a plain NSE equity series, so no verified analyst listing (not guessed).',
- 'yfinance_empty':'Yahoo returned no data for this ticker (blocked or unknown).',
+ 'yfinance_blocked':'Yahoo returned no data to this server (common on cloud hosts / throttled IPs). This is a data-source problem, not the stock\u2019s coverage.',
+ 'yfinance_empty':'Yahoo has no analyst data for this ticker.',
  'yfinance_unavailable':'Yahoo/yfinance could not be reached.'}[r]||'Analyst data unavailable.'}
 function renderRow(r){
  const d=r.detail,up=(r.chg||0)>=0;
