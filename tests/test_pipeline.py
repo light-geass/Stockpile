@@ -166,6 +166,53 @@ def test_fundamentals_nan_and_empty_info_are_reported_not_leaked():
     assert "analyst.yfinance_empty" in gaps2 and an2["target_mean"] is None
 
 
+def test_every_universe_symbol_maps_to_a_verified_yf_ticker():
+    """Regression: load_universe() built them as `f"{symbol}.NS"`, copying each symbol entry first, so the value was
+    dropped and the live scan asked yfinance for None -> 'Covered 0/12'. They must use the same verified mapping
+    as a focused run (`NSE:SYM-EQ` -> `SYM.NS`, None for non-equity series)."""
+    uni = ds.load_universe()
+    assert uni and all(u["yf"] for u in uni)
+    for u in uni:
+        assert u["yf"] == ds.yf_symbol_for(u["fyers"])
+    itc = next(u for u in uni if u["symbol"] == "ITC")
+    assert itc["yf"] == "ITC.NS" and itc["fyers"] == "NSE:ITC-EQ"
+
+
+def test_focused_run_for_a_covered_stock_reports_coverage(mk, monkeypatch):
+    """ITC has analyst coverage, so the Fundamentalist card must not read 0/1 for it."""
+    monkeypatch.setattr(ev, "market_session", lambda now=None: "open")
+    seen = []
+
+    class YF:
+        class Ticker:
+            def __init__(self, s):
+                seen.append(s)
+                self.recommendations = None
+                self.info = {"recommendationKey": "buy", "numberOfAnalystOpinions": 14, "targetMeanPrice": 470.0}
+    app, _ = mk(live_env(), {"fyers": FakeProvider(), "gdelt": FakeGdelt(), "yf": YF})
+    app.extensions["pipeline"].run("live", {**FOCUSED, "symbol": "ITC", "provider_symbol": "NSE:ITC-EQ"})
+    st = app.extensions["pipeline"].snapshot()
+    assert seen == ["ITC.NS"]                              # never a bare 'ITC' or None
+    assert st["agents"]["fundamentalist"]["stats"]["covered"] == "1/1"
+    gaps = st["verdicts"][0]["gaps"]
+    assert "analyst.no_coverage" not in gaps and "analyst.not_mapped" not in gaps  # only the mix is missing here
+    assert "analyst.buy_pct" in gaps
+
+
+def test_no_analyst_coverage_is_explained_not_silent():
+    """Regression: a small cap showed 'Covered 0/1' with an EMPTY gap list, which looks like a bug.
+    Yahoo returning no consensus/target is 'not covered' and must say so."""
+    class NoCoverage:
+        class Ticker:
+            def __init__(self, s):
+                self.recommendations = None
+                self.info = {"longName": "ITI Ltd", "sector": "Technology", "currentPrice": 215.95}
+    an, meta, gaps, tk = ds.fetch_fundamentals("ITI.NS", NoCoverage)
+    assert an["_reason"] == "no_analyst_coverage" and "analyst.no_coverage" in gaps
+    assert ds.analyst_covered(an) is False and ds.analyst_covered({**an, "buy_pct": 50.0}) is True
+    assert meta["name"] == "ITI Ltd"
+
+
 def test_agent_order_preserved_in_api(mk):
     from tests.conftest import LOCAL
     app, _ = mk()

@@ -15,20 +15,6 @@ _NSE_EQ = re.compile(r"^NSE:(.+)-EQ$")  # greedy: hyphens belong to the ticker (
 _YF_NON_EQ = {"ETF", "MF", "IETF", "SM", "IV", "RR", "E1", "P1", "X1", "XT", "N1", "N2", "W1", "T1"}
 
 
-def load_universe(path=None):
-    d = json.loads(Path(path or BASE / "universe.json").read_text(encoding="utf-8"))
-    out = []
-    for bucket in ("large", "mid", "small"):
-        for e in d.get(bucket, []):
-            e = dict(e)
-            e["cap_segment"] = bucket.capitalize()
-            sym = e["symbol"]
-            e.setdefault("fyers", f"NSE:{sym}-EQ")   # provider-specific ids live ONLY here
-            e.setdefault("yf", f"{sym}.NS")
-            out.append(e)
-    return out
-
-
 def yf_symbol_for(fyers_symbol):
     """Map a canonical FYERS NSE cash symbol to a yfinance ticker only when nothing is guessed.
 
@@ -42,6 +28,23 @@ def yf_symbol_for(fyers_symbol):
     if series in _YF_NON_EQ:
         return None
     return f"{m.group(1)}.NS"
+
+
+def load_universe(path=None):
+    d = json.loads(Path(path or BASE / "universe.json").read_text(encoding="utf-8"))
+    out = []
+    for bucket in ("large", "mid", "small"):
+        for e in d.get(bucket, []):
+            e = dict(e)
+            e["cap_segment"] = bucket.capitalize()
+            sym = e["symbol"]
+            e["fyers"] = f"NSE:{sym}-EQ"              # provider-specific ids live ONLY here
+            e["yf"] = yf_symbol_for(e["fyers"])        # same verified mapping as a focused run
+            out.append(e)
+    return out
+
+
+
 
 
 def screen(universe, quotes, per_bucket):
@@ -90,6 +93,12 @@ def fetch_fundamentals(yf_symbol, yf_module=None):
     meta = {"sector": info.get("sector"), "name": info.get("longName") or info.get("shortName")}
     an["consensus"] = _num(info.get("recommendationKey"))
     an["num_analysts"] = _num(info.get("numberOfAnalystOpinions"))
+    # No sell-side coverage on Yahoo (e.g. small caps like ITI): that is "not covered", not a failure,
+    # and must be visible as a reason instead of an empty gap list.
+    if (an["consensus"] in (None, "none") and an["num_analysts"] is None
+            and _num(info.get("targetMeanPrice")) is None):
+        an["_reason"] = "no_analyst_coverage"
+        gaps.append("analyst.no_coverage")
     an["target_mean"] = _num(info.get("targetMeanPrice"))
     an["target_low"] = _num(info.get("targetLowPrice"))
     an["target_high"] = _num(info.get("targetHighPrice"))
@@ -107,3 +116,9 @@ def fetch_fundamentals(yf_symbol, yf_module=None):
     if an["consensus"] in (None, "none"):
         an["consensus"] = None
     return an, meta, gaps, t
+
+
+def analyst_covered(an):
+    """True when at least one analyst figure is present. Shared by the agent stats and by tests so the
+    meaning of "Covered N/M" cannot drift away from what the Fundamentalist actually collected."""
+    return bool(an.get("target_mean") or an.get("consensus") or an.get("buy_pct") is not None)

@@ -188,21 +188,25 @@ class Pipeline:
                     **{"avg RVOL" if len(out) > 1 else "RVOL": f"{sum(rv) / len(rv):.2f}x" if rv else "n/a"})
         return out
 
-    def _fundamentals(self, entries, quotes, focused=False):
-        """yfinance analyst data. Focused runs never guess a ticker: an unmapped series becomes a data gap."""
+    def _fundamentals(self, entries, quotes):
+        """yfinance analyst data. The ticker comes only from the verified map (never guessed); a series with no
+        mapping (ETF, foreign listing) becomes a data gap. Universe and focused runs use the same rule."""
         self._agent("fundamentalist", "working")
         out, yf_map = {}, {}
         for e in entries:
-            yf_map[e["symbol"]] = ds.yf_symbol_for(e["fyers"]) if focused else e["yf"]
+            if "yf" not in e:  # focused entries are built from a searched symbol, not universe.json
+                e["yf"] = ds.yf_symbol_for(e["fyers"])
+            yf_map[e["symbol"]] = e["yf"]
             sym = yf_map[e["symbol"]]
             out[e["symbol"]] = (ds.fetch_fundamentals(sym, self.deps.get("yf")) if sym else
                                  (ev.empty_analyst("not_mapped"), {}, ["analyst.not_mapped"], None))
         ups = [a["target_mean"] / quotes[e["fyers"]]["live"] * 100 - 100 for e in entries
                for a in [out[e["symbol"]][0]] if a.get("target_mean") and quotes[e["fyers"]].get("live")]
-        cov = sum(1 for a, *_ in out.values()
-                  if a.get("target_mean") or a.get("consensus") or a.get("buy_pct") is not None)
+        cov = sum(1 for a, *_ in out.values() if ds.analyst_covered(a))
+        nocov = sum(1 for a, *_ in out.values() if a.get("_reason") == "no_analyst_coverage")
         self._agent("fundamentalist", "done", covered=f"{cov}/{len(entries)}",
-                    **{"avg upside": f"{sum(ups) / len(ups):+.1f}%" if ups else "n/a"})
+                    **{"avg upside": f"{sum(ups) / len(ups):+.1f}%" if ups else "n/a"},
+                    **({"note": f"{nocov} without analyst coverage"} if nocov else {}))
         self._yf_map = yf_map
         return out
 
@@ -267,7 +271,7 @@ class Pipeline:
         self._set(pulled_at=ev.now_ist().strftime("%d %b %Y, %H:%M IST"), message="Focused analysis in progress.")
         session = ev.market_session()
         tech = self._technicals(provider, [entry], quotes, session)
-        fund = self._fundamentals([entry], quotes, focused=True)
+        fund = self._fundamentals([entry], quotes)
         nws = self._news([entry], fund)
         bundle = self._bundle(entry, q, tech[entry["symbol"]], fund[entry["symbol"]], nws[entry["symbol"]],
                               self._yf_map[entry["symbol"]], retrieved, session)
@@ -391,6 +395,7 @@ class Pipeline:
                            "news_note": r.get("news_interpretation"),
                            "rvol_method": b["technicals"].get("rvol_method"),
                            "analyst": {k: b["analyst"].get(k) for k in ("consensus", "num_analysts", "buy_pct", "target_mean", "upside_pct")},
+                           "analyst_reason": b["analyst"].get("_reason"),
                            "range_52w": b["range_52w"], "limitation": b["analyst"].get("limitation")}}
 
     def _finish(self, bundles, uni_n):

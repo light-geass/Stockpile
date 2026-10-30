@@ -152,6 +152,10 @@ function renderAgents(a,focused=false){const g=$('#agents');g.replaceChildren(..
   h('div',{class:'stats'},st.length?st.slice(0,2).map(([l,x])=>h('div',{class:'stat'},h('small',{},l),h('b',{},x))):[h('div',{class:'stat'},h('small',{},'status'),h('b',{},v.status))]))}))}
 
 function chip(t){return h('span',{class:'chip'},t)}
+function noAnalyst(r){return {'no_analyst_coverage':'No analyst coverage: Yahoo lists no consensus or target for this instrument.',
+ 'not_mapped':'Not a plain NSE equity series, so no verified analyst listing (not guessed).',
+ 'yfinance_empty':'Yahoo returned no data for this ticker (blocked or unknown).',
+ 'yfinance_unavailable':'Yahoo/yfinance could not be reached.'}[r]||'Analyst data unavailable.'}
 function renderRow(r){
  const d=r.detail,up=(r.chg||0)>=0;
  const row=h('div',{class:'card row','data-open':'false'});
@@ -172,7 +176,7 @@ function renderRow(r){
    h('div',{},h('h4',{},'Panel reasoning'),h('ul',{},pts),d.news_note?h('p',{class:'tag'},d.news_note):null),
    h('div',{},h('h4',{},'Headlines (headline-only evidence)'),news.length?h('ul',{},news):h('p',{class:'tag'},'No relevant headlines found.'),
     h('h4',{style:'margin-top:14px'},'Analyst data'),
-    h('p',{class:'tag'},an.consensus?`Consensus ${an.consensus} · ${an.num_analysts??'?'} analysts · buy ${an.buy_pct??'n/a'}% · target ${fmtPx(an.target_mean)} (${fmtPct(an.upside_pct)})`:'Analyst data unavailable.'),
+    h('p',{class:'tag'},an.consensus?`Consensus ${an.consensus} · ${an.num_analysts??'?'} analysts · buy ${an.buy_pct??'n/a'}% · target ${fmtPx(an.target_mean)} (${fmtPct(an.upside_pct)})`:noAnalyst(d.analyst_reason)),
     h('p',{class:'tag'},d.limitation||''))),
   h('div',{style:'margin-top:12px;display:flex;flex-direction:column;gap:4px'},
    h('div',{class:'tag'},`Engine: ${r.engine}${r.fallback?' (fallback: '+r.fallback+')':''} · data: ${r.freshness}${r.quote_age!=null?' ('+r.quote_age+'s old)':''}${d.rvol_method?' · RVOL: '+d.rvol_method:''}`),
