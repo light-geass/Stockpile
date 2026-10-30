@@ -23,6 +23,27 @@ def test_quotes_parse_and_auth_header():
     assert kw["params"]["symbols"] == "NSE:SBIN-EQ,NSE:BAD-EQ"
 
 
+def test_html_429_is_reported_as_rate_limited_not_non_json():
+    """Regression: the dashboard showed 'non-JSON response (HTTP 429)' and the token looked disconnected.
+    A rate limit is not a dead session, and the message must say so."""
+    c, _ = client([Resp(None, raise_json=True, status=429, text="<html>Too Many Requests</html>")])
+    try:
+        c.quotes(["NSE:WIPRO-EQ"])
+        assert False, "expected FyersError"
+    except FyersError as e:
+        assert e.kind == "rate_limited" and "429" in e.message and "non-JSON" not in e.message
+
+
+def test_profile_distinguishes_a_dead_token_from_a_network_problem():
+    c, http = client([Resp({"s": "ok", "code": 200, "data": {"fy_id": "X"}})])
+    assert c.profile() == (True, None) and http.calls[0][1].endswith("/api/v3/profile")
+    dead, _ = client([Resp({"s": "error", "code": -16, "message": "Could not authenticate"})])
+    assert dead.profile() == (False, "auth_expired")
+    down, _ = client([requests.ConnectionError("x")])
+    assert down.profile() == (False, "unreachable")
+    assert client([], tok=None)[0].profile() == (False, "no_token")
+
+
 def test_quotes_chunked_by_50():
     c, http = client([Resp({"s": "ok", "d": []}), Resp({"s": "ok", "d": []})])
     c.quotes([f"NSE:S{i}-EQ" for i in range(75)])

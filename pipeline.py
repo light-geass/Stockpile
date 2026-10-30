@@ -159,7 +159,19 @@ class Pipeline:
         if not self.auth.get_token():
             self._agent("scout", "error")
             raise RunAbort("FYERS is not connected. Open the dashboard through your HTTPS tunnel and click Connect FYERS.")
-        return self._fyers()
+        p = self._fyers()
+        if hasattr(p, "profile"):
+            ok, why = p.profile()
+            if not ok and why == "auth_expired":
+                # The stored token looks valid locally but FYERS no longer accepts it: make the pill say so.
+                self.auth.mark_expired()
+                self._agent("scout", "error")
+                raise RunAbort("FYERS replaced this session (a newer login or an app change invalidated the stored token). "
+                               "Click Connect FYERS and run again.")
+            if not ok and why == "rate_limited":
+                self._agent("scout", "error")
+                raise RunAbort("FYERS is rate-limiting this server right now. Wait a minute, then run again.")
+        return p
 
     def _technicals(self, provider, entries, quotes, session):
         self._agent("technician", "working")

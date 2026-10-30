@@ -1,4 +1,5 @@
 import re
+import time
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -57,6 +58,24 @@ def test_session_and_freshness():
     assert ev.freshness(True, "closed", None, now, 300) == "synthetic" and ev.freshness(False, "open", None, now, 300) == "unknown"
 
 
+def test_fyers_tt_never_makes_a_quote_stale():
+    """Regression: '12 quotes are older than 300s ... median age 28003s'. FYERS' `tt` is a fixed daily epoch, not
+    the quote time, so freshness must report 'unknown' rather than a false staleness that blocks every alert."""
+    from datetime import datetime, timezone
+    from fyers_client import FyersClient
+    from tests.conftest import FakeHTTP, Resp
+    http = FakeHTTP([Resp({"s": "ok", "code": 200, "d": [{"n": "NSE:X-EQ", "s": "ok", "v": {
+        "lp": 100.0, "prev_close_price": 99.0, "chp": 1.0, "volume": 10, "tt": 1635120000}}]})])
+    quote = FyersClient("APP", lambda: "tok", http=http).quotes(["NSE:X-EQ"])["NSE:X-EQ"]
+    b = ev.assemble_bundle({"symbol": "X", "name": "X"}, {**quote, "quote_epoch": None}, {}, {},
+                           ev.empty_analyst(), {"total": 0}, {}, datetime.now(timezone.utc), [], session="open")
+    assert b["freshness"] == "unknown" and b["quote_age_sec"] is None
+    # and a provider that DOES supply a real quote time is still judged live
+    b2 = ev.assemble_bundle({"symbol": "X"}, {"live": 100.0, "quote_epoch": int(time.time()) - 5}, {}, {},
+                            ev.empty_analyst(), {"total": 0}, {}, datetime.now(timezone.utc), [], session="open")
+    assert b2["freshness"] == "live" and 5 <= b2["quote_age_sec"] <= 7
+
+
 def test_grounding_number_checks():
     b = {"price": {"live": 1842.5}, "technicals": {"rvol": 3.4}, "news": {"recent": [{"title": "Profit up 12% in Q2", "sentiment": "positive"}]}}
     facts, news, idx = g.build_facts(b)
@@ -68,9 +87,7 @@ def test_grounding_number_checks():
     assert g.verify_statement("Profit up 12%", ["N1"], idx, facts) == []         # figure from a cited headline
     assert g.verify_statement("Profit up 12%", [], idx, facts)                   # same figure, not cited
     assert g.verify_statement("x", ["E77"], idx, facts)
-    # caller-supplied numbers (panel scores) pass at exact value only, not on rounding
-    assert g.verify_statement("Bull 70 vs bear 10", [], idx, facts, extra=(70, 10)) == []
-    assert g.verify_statement("About 71", [], idx, facts, extra=(70, 10))
+    assert g.verify_statement("Bull 70 vs bear 10", [], idx, facts)          # a score is not evidence → rejected
 
 
 def test_news_dedupe_relevance_injection():

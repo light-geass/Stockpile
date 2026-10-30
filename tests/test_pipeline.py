@@ -106,6 +106,9 @@ def test_live_end_to_end_with_mocks_sends_one_alert_per_day(mk, monkeypatch):
     assert len([m for m in tg.sent if "BUY SIGNAL" in m]) == n
 
 
+
+
+
 def test_live_market_closed_blocks_alerts(mk, monkeypatch):
     monkeypatch.setattr(ev, "market_session", lambda now=None: "closed")
     tg = FakeTG()

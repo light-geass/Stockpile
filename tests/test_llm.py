@@ -116,21 +116,26 @@ def test_invented_number_fails_grounding(mk):
     assert not llm.alert_eligibility(b, r, s)["eligible"]
 
 
-def test_panel_scores_are_prompt_context_and_not_grounding_failures(mk):
-    """Regression: 'ITC: LLM fallback to deterministic engine (grounding_failed). bull: untraceable number 10'.
-    Bull/Bear scores are the panel's own output, so quoting them must not fail; they must never be citable ids."""
+def test_engine_scores_are_prompt_context_but_panel_scores_in_prose_are_rejected(mk):
+    """Regression for 'INFY/TCS: LLM fallback ... bull: untraceable number 10'. The engine's scores are sent as
+    context and the system prompt forbids restating the panel's own scores, so a compliant reply passes; a reply
+    that still writes its score as a number is ungrounded, exactly like any other invented number."""
     _, s = mk()
     b = live_bundle("ITC")
-    p = good_payload(b)
-    p["agents"]["bull"]["point"] = "Bull case scores 70 against a bear score of 10, with RVOL 2.4x."
-    p["judge"]["rationale"] = "Bull 70 beats bear 10; volume of 2.4x confirms."
-    c, http = mkclient([ok_resp(p)])
-    r = llm.evaluate(b, s, c)
-    assert r["engine"] == "groq" and r["fallback_reason"] is None, r["validation"]
-    sent = http.calls[0][2]["json"]["messages"][1]["content"]
-    assert "deterministic_engine" in sent and '"bull": 70' not in sent  # engine's own scores, not the panel's
-    facts, _, index = build_facts(b)
-    assert all("score" not in f["path"] for f in facts)  # scores are not evidence
+    c, http = mkclient([ok_resp(good_payload(b))])
+    assert llm.evaluate(b, s, c)["engine"] == "groq"
+    sent = http.calls[0][2]["json"]["messages"]
+    assert "deterministic_engine" in sent[1]["content"]
+    assert "not restate" not in sent[1]["content"] and "Do not write your bull/bear scores" in sent[0]["content"]
+
+    bad = good_payload(b)
+    bad["agents"]["bull"]["point"] = "Bull case scores 70 against a bear score of 10, with RVOL 2.4x."
+    c2, _ = mkclient([ok_resp(bad), ok_resp(bad)])
+    r = llm.evaluate(b, s, c2)
+    assert r["fallback_reason"] == "grounding_failed"
+    assert any(i.startswith("bull:") and "untraceable" in i for i in r["validation"]["issues"])
+    facts, _, _ = build_facts(b)
+    assert all("score" not in f["path"] for f in facts)  # scores are never evidence
 
 
 def test_invented_number_still_fails_when_scores_are_present(mk):

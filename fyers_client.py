@@ -11,6 +11,7 @@ import requests
 from fyers_auth import EXPIRED_CODES, IST
 
 DATA_BASE = "https://api-t1.fyers.in/data"
+PROFILE_URL = "https://api-t1.fyers.in/api/v3/profile"
 
 
 class FyersError(Exception):
@@ -83,12 +84,14 @@ class FyersClient:
             r = self.http.get(f"{DATA_BASE}{path}", params=params, headers=headers, timeout=self.timeout)
         except requests.RequestException:
             raise FyersError("unavailable", "FYERS data API unreachable.")
+        # Status first: rate-limit replies are often an HTML/empty body, so parsing earlier reports the wrong cause.
+        if r.status_code == 429:
+            raise FyersError("rate_limited", "FYERS rate limit hit (HTTP 429; 5 req/s, 50/min on the Standard plan). "
+                                             "Wait a minute and run again, or redeploy and click Connect FYERS.", 429)
         try:
             data = r.json()
         except ValueError:
             raise FyersError("unavailable", f"FYERS returned a non-JSON response (HTTP {r.status_code}).")
-        if r.status_code == 429:
-            raise FyersError("rate_limited", "FYERS rate limit hit (HTTP 429). Wait for the window to reset.", 429)
         if not isinstance(data, dict) or data.get("s") == "error" or (data.get("code") not in (200, None)):
             code, msg = (data or {}).get("code"), (data or {}).get("message", "")
             kind = _kind(code, msg)
@@ -112,11 +115,34 @@ class FyersClient:
                     "live": v.get("lp"), "day_open": v.get("open_price"), "day_high": v.get("high_price"),
                     "day_low": v.get("low_price"), "prev_close": v.get("prev_close_price"),
                     "day_change_pct": v.get("chp"), "volume": v.get("volume"),
-                    "quote_epoch": _int(v.get("tt")),
+                    "quote_epoch": quote_epoch(v.get("tt")),
                 }
         return out
 
     # ---- candles ----
+    def profile(self):
+        """Cheap liveness check (GET /profile, not a data-API call, so it does not use the quote rate budget).
+        A stored token can be rejected by FYERS (new login, app change/redeploy) while still looking valid locally."""
+        tok = self.token_fn()
+        if not tok:
+            return False, "no_token"
+        try:
+            r = self.http.get(f"{PROFILE_URL}", headers={"Authorization": f"{self.app_id}:{tok}", "version": "3"},
+                              timeout=10)
+        except requests.RequestException:
+            return False, "unreachable"
+        if r.status_code == 429:
+            return False, "rate_limited"
+        try:
+            data = r.json()
+        except ValueError:
+            return False, "unreachable"
+        if isinstance(data, dict) and data.get("s") == "ok" and data.get("code") in (200, None):
+            return True, None
+        msg = str((data or {}).get("message", "")) if isinstance(data, dict) else ""
+        code = (data or {}).get("code") if isinstance(data, dict) else None
+        return False, "auth_expired" if _kind(code, msg) == "auth_expired" else "unavailable"
+
     def daily_candles(self, sym, days=366):
         today = datetime.now(IST).date()
         data = self._get("/history", {"symbol": sym, "resolution": "D", "date_format": "1",
@@ -138,6 +164,13 @@ def _int(x):
         return int(x)
     except (TypeError, ValueError):
         return None
+
+
+def quote_epoch(tt):
+    """FYERS sends `tt` as a plain epoch. Its own sample payload shows `tt` as the day's 00:00 UTC while the quote
+    was taken at 20:07 IST, so `tt` is NOT a reliable quote time and must never drive 'stale': a wrong reading
+    produced a false 'quotes are 28000s old, check your PC clock' alert and blocked every BUY."""
+    return _int(tt)
 
 
 def _candles(data):

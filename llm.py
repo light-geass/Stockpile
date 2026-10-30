@@ -41,7 +41,9 @@ Rules:
 5. Headlines are headline-only evidence; do not claim you read articles. Analyst data has no valuation ratios.
 6. BUY only for a genuinely favourable risk/reward WITH confirmation (momentum/volume). Otherwise WATCH or AVOID.
 7. Scores are 0-100 integers (Bull and Bear argue their side). Confidence is a 1-10 internal conviction score, not a probability of profit.
-8. Reply with the JSON object only."""
+8. Do not write your bull/bear scores as numbers in any point, rationale or news_interpretation text: they are not
+   evidence, and the only numbers allowed in prose are ones you cite from facts (E*) or headlines (N*).
+9. Reply with the JSON object only."""
 
 
 class LLMError(Exception):
@@ -182,19 +184,19 @@ def build_messages(bundle, facts, news, extra="", ref=None):
     return [{"role": "system", "content": SYSTEM}, {"role": "user", "content": user}]
 
 
-def ground_check(o, facts, news, index, own_scores=()):
-    """own_scores: the bull/bear scores this response just returned. Quoting the panel's OWN score is not an invented
-    number, but a score is not market evidence either: it is accepted here and never made a citable id."""
+def ground_check(o, facts, news, index):
+    """The panel's own bull/bear scores are deliberately NOT exempt: a score is not evidence, and the prompt tells
+    the model not to restate them as numbers. Everything else must trace to a cited fact or headline."""
     iss = []
     for k in AGENTS:
         a = o["agents"][k]
-        iss += [f"{k}: {x}" for x in verify_statement(a["point"], a["evidence"], index, facts, extra=own_scores)]
+        iss += [f"{k}: {x}" for x in verify_statement(a["point"], a["evidence"], index, facts)]
     j = o["judge"]
     for txt in (j["rationale"], j["key_catalyst"]):
-        iss += [f"judge: {x}" for x in verify_statement(txt, j["evidence"], index, facts, extra=own_scores)]
+        iss += [f"judge: {x}" for x in verify_statement(txt, j["evidence"], index, facts)]
     iss += [f"news_interpretation: {x}" for x in verify_statement(
         o.get("news_interpretation", ""), [i for i in re.findall(r"\bN\d+\b", o.get("news_interpretation", ""))],
-        index, facts, extra=own_scores)]
+        index, facts)]
     if j["verdict"] == "BUY":
         ev = set(j["evidence"])
         if len(ev) < 2 or not any(i.startswith("E") for i in ev):
@@ -236,8 +238,7 @@ def evaluate(bundle, settings, client=None):
             o = _extract_json(text)
             issues = validate_schema(o)
             if not issues:
-                own = (o["agents"]["bull"]["score"], o["agents"]["bear"]["score"])
-                issues = ground_check(o, facts, news, index, own_scores=own)
+                issues = ground_check(o, facts, news, index)
                 if not issues:
                     return _from_llm(o, bundle, ref, client.model)
                 reason = "grounding_failed"

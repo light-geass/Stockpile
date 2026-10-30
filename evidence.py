@@ -19,7 +19,7 @@ def market_session(now=None):
 def freshness(source_synthetic, session, quote_epoch, retrieved, max_age):
     if source_synthetic:
         return "synthetic"
-    if quote_epoch is None:
+    if quote_epoch is None:  # exchange gives no trustworthy quote time: never claim stale
         return "unknown"
     age = retrieved.timestamp() - quote_epoch
     if session == "open":
@@ -152,6 +152,8 @@ def assemble_bundle(entry, quote, technicals, rng, analyst, news, source, retrie
     an = dict(analyst)
     if an.get("target_mean") and live:
         an["upside_pct"] = _r((an["target_mean"] - live) / live * 100)
+    # FYERS passes no quote_epoch at all (its `tt` is a fixed daily value, not the quote time), so qts shows only
+    # what the provider actually gave us. freshness() then returns 'unknown' instead of a false 'stale'.
     ep = quote.get("quote_epoch")
     qts = datetime.fromtimestamp(ep, timezone.utc).isoformat() if ep else quote.get("quote_timestamp")
     b = {
