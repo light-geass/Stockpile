@@ -8,6 +8,7 @@ import evidence as ev
 import data_sources as ds
 from fyers_client import FyersError
 from tests.conftest import FakeHTTP, rows as db_rows
+from watchlists import UNIVERSE_SEED
 
 IST = ev.IST
 
@@ -95,8 +96,10 @@ def test_live_end_to_end_with_mocks_sends_one_alert_per_day(mk, monkeypatch):
     deps = {"fyers": FakeProvider(), "gdelt": FakeGdelt(), "yf": FakeYF, "telegram": tg}
     app, _ = mk({**live_env(), "TELEGRAM_ENABLED": "true", "TELEGRAM_BOT_TOKEN": "t", "TELEGRAM_CHAT_ID": "1"}, deps)
     st = run(app, "live")
-    assert st["status"] == "done" and st["kpis"]["in_debate"] == 12
-    assert not st["footer"]["synthetic"] and "real NSE stocks" in st["footer"]["text"]
+    assert st["status"] == "done" and st["watchlist"]["name"] == "Watchlist 1"
+    assert st["kpis"]["in_debate"] == 4                       # top-4 movers of the whole list, no cap buckets
+    assert st["kpis"]["universe"] == len(UNIVERSE_SEED)
+    assert not st["footer"]["synthetic"] and "Watchlist 1" in st["footer"]["text"]
     assert any("GROQ_API_KEY not set" in w for w in st["warnings"])
     buys = [v for v in st["verdicts"] if v["verdict"] == "BUY"]
     assert buys and all(v["freshness"] == "live" and v["alert"]["status"] == "sent" for v in buys)
@@ -166,16 +169,17 @@ def test_fundamentals_nan_and_empty_info_are_reported_not_leaked():
     assert "analyst.yfinance_empty" in gaps2 and an2["target_mean"] is None
 
 
-def test_every_universe_symbol_maps_to_a_verified_yf_ticker():
-    """Regression: load_universe() built them as `f"{symbol}.NS"`, copying each symbol entry first, so the value was
-    dropped and the live scan asked yfinance for None -> 'Covered 0/12'. They must use the same verified mapping
-    as a focused run (`NSE:SYM-EQ` -> `SYM.NS`, None for non-equity series)."""
-    uni = ds.load_universe()
+def test_every_seeded_watchlist_symbol_maps_to_a_verified_yf_ticker():
+    """Regression: the old JSON loader asked yfinance for None -> 'Covered 0/12'. Watchlist entries must use the
+    same verified mapping as a focused run (`NSE:SYM-EQ` -> `SYM.NS`, None for non-equity series)."""
+    uni = [ds.entry_from_item({"provider_symbol": f"NSE:{s}-EQ", "symbol": s, "name": n, "asset_type": "EQUITY"})
+           for _, s, n in UNIVERSE_SEED]
     assert uni and all(u["yf"] for u in uni)
     for u in uni:
         assert u["yf"] == ds.yf_symbol_for(u["fyers"])
     itc = next(u for u in uni if u["symbol"] == "ITC")
     assert itc["yf"] == "ITC.NS" and itc["fyers"] == "NSE:ITC-EQ"
+    assert ds.entry_from_item({"provider_symbol": "NSE:XYZ-ETF-EQ", "symbol": "XYZ", "name": "X"})["yf"] is None
 
 
 def test_focused_run_for_a_covered_stock_reports_coverage(mk, monkeypatch):
@@ -299,7 +303,7 @@ def test_focused_run_analyses_only_the_selected_instrument_without_alerts(mk, mo
     assert [v["symbol"] for v in st["verdicts"]] == ["NIFTYBEES"]
     assert st["kpis"]["universe"] == 1 and st["kpis"]["in_debate"] == 1
     assert st["target"]["provider_symbol"] == "NSE:NIFTYBEES-EQ"
-    assert "not from universe.json" in st["footer"]["text"]
+    assert "not from a watchlist" in st["footer"]["text"]
     assert tg.sent == []                                   # focused runs never message Telegram
     assert st["verdicts"][0]["alert"]["status"] == "skipped"
     assert db_rows(app.extensions["store"], "SELECT COUNT(*) FROM verdicts")[0][0] == 1

@@ -7,6 +7,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import config  # noqa: E402
 from app import create_app  # noqa: E402
+from watchlists import UNIVERSE_SEED  # noqa: E402
 
 TUNNEL = "abc-123.ngrok-free.app"
 LOCAL = "http://127.0.0.1:5000"
@@ -22,6 +23,77 @@ class Resp:
         if self.raise_json:
             raise ValueError("no json")
         return self._d
+
+
+class FakeWatchlists:
+    """In-memory stand-in for the Supabase store: same API and errors, so routes/pipeline/tests never need a DB.
+    Starts as the seeded Watchlist 1 (the retired universe) unless items=[]."""
+
+    def __init__(self, items=None, max_items=50):
+        from watchlists import WatchlistError
+        self._err = WatchlistError
+        self.max_items = max_items
+        self.lists_ = [{"id": 1, "name": "Watchlist 1", "created_at": "", "updated_at": "", "items": [
+            {"provider_symbol": f"NSE:{s}-EQ", "symbol": s, "name": n, "exchange": "NSE", "asset_type": "EQUITY"}
+            for _, s, n in UNIVERSE_SEED]}] if items is None else []
+        if items is not None:
+            self.create("Watchlist 1")
+            for i in items:
+                self.add_item(1, i)
+        self.next_id = 2
+
+    @staticmethod
+    def _out(w):
+        return {**w, "count": len(w["items"])}
+
+    def _get(self, wid):
+        for w in self.lists_:
+            if w["id"] == int(wid):
+                return w
+        raise self._err("not_found", "That watchlist no longer exists.")
+
+    def lists(self):
+        return [self._out(w) for w in self.lists_]
+
+    def get(self, wid):
+        return self._out(self._get(wid))
+
+    def first_id(self):
+        return self.lists_[0]["id"] if self.lists_ else None
+
+    def create(self, name):
+        w = {"id": self.next_id, "name": name, "created_at": "", "updated_at": "", "items": []}
+        self.next_id += 1
+        self.lists_.append(w)
+        return self._out(w)
+
+    def rename(self, wid, name):
+        w = self._get(wid)
+        w["name"] = name
+        return self._out(w)
+
+    def delete(self, wid):
+        w = self._get(wid)
+        if len(self.lists_) <= 1:
+            raise self._err("last_list", "Keep at least one watchlist.")
+        self.lists_.remove(w)
+
+    def add_item(self, wid, instrument):
+        w = self._get(wid)
+        if any(i["provider_symbol"] == instrument["provider_symbol"] for i in w["items"]):
+            raise self._err("duplicate", "already in this watchlist")
+        if len(w["items"]) >= self.max_items:
+            raise self._err("too_many", "limit reached")
+        w["items"].append({k: instrument.get(k) for k in ("provider_symbol", "symbol", "name", "exchange", "asset_type")})
+        return self._out(w)
+
+    def remove_item(self, wid, provider_symbol):
+        w = self._get(wid)
+        keep = [i for i in w["items"] if i["provider_symbol"] != provider_symbol]
+        if len(keep) == len(w["items"]):
+            raise self._err("not_found", "That stock is not in the watchlist.")
+        w["items"] = keep
+        return self._out(w)
 
 
 class FakeHTTP:
@@ -60,6 +132,7 @@ def mk(tmp_path, monkeypatch):
         for k, v in (env or {}).items():
             monkeypatch.setenv(k, v)
         s = config.Settings.from_env()
+        deps = {"watchlists": FakeWatchlists(), **(deps or {})}  # tests never touch Supabase
         return create_app(s, deps), s
     return make
 

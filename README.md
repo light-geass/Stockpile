@@ -3,8 +3,11 @@
 Eight agents (Scout, Technician, Fundamentalist, Newsdesk, Bull, Bear, Judge, Messenger) screen NSE stocks, debate each one,
 and call **BUY / WATCH / AVOID**. BUY signals can be sent to Telegram. **Analysis only: no order or trading endpoint exists in this code.**
 
+**Watchlists:** lists live in Supabase Postgres and appear in a sidebar (a drawer on phones). Add a stock to the selected list from the
+search result, then **Run analysis** analyses that list only. The retired `universe.json` is now **Watchlist 1** (imported once).
+
 **Search & select:** search any listed NSE stock, ETF or recently listed IPO by name or symbol, pick it from the autocomplete,
-and press **Analyze selected** to run the same agents on that one instrument — no edit to `universe.json` needed.
+and press **Analyze selected** to run the same agents on that one instrument — no watchlist edit needed.
 
 ## 1. Try it now (Demo mode — no keys, no ngrok, no internet)
 
@@ -51,7 +54,7 @@ in FYERS settings and `.env` (scheme, host, path, no trailing slash differences)
 * Residual risk: the callback URL with the one-time code sits briefly in your browser history/ngrok's inspector (`localhost:4040`). The code is single-use and short-lived.
 
 ## 4. Pipeline and engines
-* **Scout** (Python): one FYERS quotes call for `universe.json`, keeps the top-N movers per bucket (`SHORTLIST_PER_BUCKET`, default 4).
+* **Scout** (Python): one FYERS quotes call for the selected watchlist, keeps the top-N movers (`SHORTLIST_PER_BUCKET`, default 4).
 * **Technician** (FYERS candles): RVOL, 10-day SMA position/trend, ~1-month return, swing levels, 52-week range (from ≤366 daily candles). During open hours RVOL is **time-matched intraday** (5-min bars); if that is impossible it falls back to full-day volume and is **labelled** `…UNADJUSTED` / `full_day_volume…`.
 * **Fundamentalist** (yfinance): analyst consensus, buy/hold/sell mix, mean target and upside. **Only** analyst data: no P/E, ROE or margins, and coverage of small caps is often missing (shown as data gaps). It reads `.info` first and, when Yahoo returns nothing for the server, falls back to the analyst report endpoints. **Yahoo blocks datacentre IPs** (Render included) on `.info`, so on a cloud host set `YFINANCE_PROXY` (or `PROXY_URL`) to a residential proxy; unset, nothing changes.
 * **Newsdesk**: Yahoo/yfinance headlines, then **Google News RSS** (no key, unthrottled) when those are thin, then GDELT DOC (last resort: it 429s aggressively). Deduped, company-name filtered, prompt-injection-flagged items withheld from the model. **Headline-only**; tone is a transparent keyword heuristic.
@@ -108,7 +111,19 @@ in FYERS settings and `.env` (scheme, host, path, no trailing slash differences)
 | Search says "Symbol list is temporarily unavailable" | The symbol master could not be downloaded and nothing was cached. Check the server log and network access to `public.fyers.in`. |
 | Focused run: "No verified yfinance listing" | The instrument is not a plain `-EQ` equity (e.g. ETF series). Analyst fields are shown as gaps. |
 
+## 5c. Watchlists (Supabase Postgres)
+* Set `SUPABASE_DATABASE_URL` (the session-pooler URI from Supabase → Connect) as a **server-side** variable. No Supabase key is ever
+  sent to the browser; the browser only names a watchlist id and, when adding, a provider symbol that the server re-verifies against the
+  FYERS catalogue. Without a reachable database the sidebar reports the outage and runs fail visibly — nothing falls back to a file.
+* **Schema:** `watchlists` and `watchlist_items` (FK with `ON DELETE CASCADE`, unique `(watchlist_id, provider_symbol)`, timestamps,
+  ordered by `position`). They are created idempotently at boot; a marker row in `app_migrations` means the retired universe is imported
+  as **Watchlist 1** at most once and never overwritten. Cap: `WATCHLIST_MAX_ITEMS` (default 50).
+* **API:** `GET/POST /api/watchlists`, `PATCH/DELETE /api/watchlists/<id>`, `POST /api/watchlists/<id>/items`,
+  `DELETE /api/watchlists/<id>/items/<provider_symbol>`; `POST /api/start {watchlist_id}` runs that list (first list if omitted).
+  PATCH and DELETE are CSRF- and Origin-checked like POST. The last list cannot be deleted.
+* Lists are shared by everyone who can unlock the dashboard; there is no per-user account model.
+
 ## 7. Layout
-`app.py` routes+security · `fyers_auth.py` OAuth/token store · `fyers_client.py` read-only data client · `instrument_search.py` NSE symbol-master catalogue/search · `data_sources.py` universe/yfinance/demo loader · `evidence.py` indicators+bundle · `news.py` · `grounding.py` evidence IDs/number checks · `scoring.py` deterministic engine · `llm.py` Groq panel+alert rules · `pipeline.py` orchestration · `notifier.py` Telegram · `storage.py` SQLite · `dashboard.html` UI · `universe.json` editable stock list (buckets are your own grouping, not official cap classes).
+`app.py` routes+security · `fyers_auth.py` OAuth/token store · `fyers_client.py` read-only data client · `instrument_search.py` NSE symbol-master catalogue/search · `data_sources.py` watchlist entries/yfinance · `evidence.py` indicators+bundle · `news.py` · `grounding.py` evidence IDs/number checks · `scoring.py` deterministic engine · `llm.py` Groq panel+alert rules · `pipeline.py` orchestration · `notifier.py` Telegram · `storage.py` SQLite audit · `watchlists.py` Supabase watchlist store · `dashboard.html` UI.
 
 *Not investment advice. Educational software; no warranty.*

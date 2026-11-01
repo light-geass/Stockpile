@@ -202,7 +202,7 @@ def test_status_exposes_search_state(mk):
     cat = InstrumentCatalogue(http=FakeHTTP(), records=parse_master(MASTER))
     app, _ = mk(deps={"catalogue": cat})
     d = app.test_client().get("/api/status", base_url=LOCAL).json
-    assert d["scope"] == "universe" and d["search"]["ready"] is True and d["search"]["stale"] is False
+    assert d["scope"] == "watchlist" and d["search"]["ready"] is True and d["search"]["stale"] is False
     assert d["search"]["min_query"] == 2
 
 

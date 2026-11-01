@@ -93,6 +93,8 @@ class Settings:
     groq_timeout: float
     instrument_catalogue_url: str
     instrument_catalogue_ttl: int
+    database_url: str
+    watchlist_max_items: int
     data_dir: Path
 
     @classmethod
@@ -124,6 +126,8 @@ class Settings:
             groq_timeout=_f("GROQ_TIMEOUT", 60),
             instrument_catalogue_url=_s("INSTRUMENT_CATALOGUE_URL", "https://public.fyers.in/sym_details/NSE_CM.csv"),
             instrument_catalogue_ttl=_i("INSTRUMENT_CATALOGUE_TTL", 21600),  # 6 h; file changes far slower
+            database_url=_s("SUPABASE_DATABASE_URL"),  # server-side connection string; never sent to the browser
+            watchlist_max_items=_i("WATCHLIST_MAX_ITEMS", 50),
             data_dir=Path(_s("DATA_DIR", str(DATA_DIR))).resolve(),
         )
 
@@ -155,4 +159,5 @@ class Settings:
 
     def secret_values(self):
         return [v for v in (self.fyers_app_secret, self.fyers_access_token, self.flask_secret_key,
-                            self.dashboard_access_key, self.groq_api_key, self.telegram_bot_token) if v]
+                            self.dashboard_access_key, self.groq_api_key, self.telegram_bot_token,
+                            self.database_url) if v]

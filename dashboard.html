@@ -87,12 +87,89 @@ footer{margin-top:36px;color:var(--muted);font-size:13px;display:flex;flex-direc
 footer .foot-main{font-weight:550;color:var(--ink)}
 @media (max-width:900px){.kpis,.agents{grid-template-columns:repeat(2,1fr)}.row>button.head{grid-template-columns:1fr auto;gap:10px}.row .conv,.row .why{grid-column:1/-1}.dg{grid-template-columns:1fr}}
 @media (max-width:480px){.kpis,.agents{grid-template-columns:1fr}}
+
+/* ---- watchlist sidebar: accordion of lists (desktop) / drawer (mobile) ---- */
+.shell{display:grid;grid-template-columns:auto minmax(0,1fr);gap:0;max-width:1480px;margin:0 auto}
+.wl{width:300px;height:100vh;position:sticky;top:0;display:flex;flex-direction:column;padding:22px 14px;gap:12px;overflow:auto;background:color-mix(in srgb,var(--card) 72%,var(--bg));border-right:1px solid var(--line)}
+.wl.collapsed{width:58px;padding:18px 6px;grid-column:1;min-width:58px}
+.wl-top{display:flex;align-items:center;justify-content:space-between;padding:0 4px;gap:8px}
+.wl h2{margin:0;padding:0;font-size:15px;letter-spacing:-.01em;color:var(--ink);font-weight:700}
+.wl h2::after{content:"";display:block;width:24px;height:2px;margin-top:5px;border-radius:4px;background:var(--accent)}
+.menu{display:none;margin-bottom:10px;font-size:13px;padding:6px 12px}
+.wl-top .x{all:unset;cursor:pointer;color:var(--muted);font-size:20px;line-height:1;padding:4px 8px;border-radius:8px;display:none}
+.wl-top .x:focus-visible{outline:2px solid var(--accent)}
+.wl nav{display:flex;flex-direction:column;gap:5px;min-width:0}
+.wl-group{display:flex;flex-direction:column;gap:0}
+.wl.collapsed nav{min-width:0}
+.wl-item{all:unset;box-sizing:border-box;cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:10px;padding:11px 12px;border:1px solid transparent;border-radius:12px;font-size:14px;transition:background .15s,border-color .15s,transform .15s}
+.wl-item:hover{background:var(--soft);transform:translateX(1px)}
+.wl-item[aria-expanded=true]{background:color-mix(in srgb,var(--accent) 12%,var(--card));border-color:color-mix(in srgb,var(--accent) 35%,var(--line));font-weight:650}
+.wl-item:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+.wl-item small{min-width:25px;padding:2px 7px;border-radius:99px;background:var(--soft);color:var(--muted);font-weight:650;font-size:11px;text-align:center}
+.wl-item[aria-expanded=true] small{background:var(--accent);color:var(--accent-ink)}
+.wl-items{list-style:none;margin:-4px 0 0;padding:8px 4px 8px 10px;border-left:2px solid color-mix(in srgb,var(--accent) 28%,var(--line));}
+.wl-items:empty{display:none}
+.wl-items li{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:7px 9px;font-size:13px;border-radius:9px}
+.wl-items li:hover{background:var(--soft)}
+.wl-items li>div{min-width:0}.wl-items li b{font-weight:650;display:block}.wl-items li small{color:var(--muted);display:block;font-size:11.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:190px}
+.wl-items .x{all:unset;cursor:pointer;color:var(--muted);font-size:15px;padding:0 4px;visibility:hidden}
+.wl-items li:hover .x,.wl-items li .x:focus-visible{visibility:visible}
+.wl-items .stale{color:var(--watch)}
+.wl-hint{color:var(--muted);font-size:12px;padding:10px 12px;line-height:1.45;border:1px solid var(--line);border-radius:11px;background:var(--soft);max-width:none}
+.wl.collapsed .wl-hint{display:none}
+.wl-tools{display:flex;gap:7px;padding:4px 0 0;flex-wrap:wrap;border-top:1px solid var(--line)}
+.wl-tools .btn{flex:1;padding:8px 8px;font-size:12.5px;white-space:nowrap}
+.wl-tools .btn:disabled{opacity:.4}
+.wl.collapsed .wl-tools{flex-direction:column;padding:0 4px}
+.wl.collapsed .wl-tools .btn{flex:1 1 auto;padding:6px}
+.wl.collapsed .wl-top h2{display:none}
+.wl.collapsed .menu{display:none}
+.workspace-tabs{display:flex;gap:4px;margin-top:22px;padding:4px;background:var(--soft);border:1px solid var(--line);border-radius:14px;width:max-content}
+.workspace-tab{border:0;background:transparent;color:var(--muted);padding:9px 18px;border-radius:10px;font:inherit;font-weight:650;cursor:pointer}
+.workspace-tab:hover{color:var(--ink)}.workspace-tab[aria-selected=true]{background:var(--card);color:var(--ink);box-shadow:var(--shadow)}
+.watchlist-toolbar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:22px 0 16px}
+.watchlist-toolbar label{font-size:13px;font-weight:650;color:var(--muted)}
+.watchlist-toolbar select{min-width:240px;border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:10px;padding:10px 12px;font:inherit}
+.watchlist-toolbar select:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.watchlist-summary{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:0 0 16px;padding:16px 18px}
+.watchlist-summary h2{margin:0;color:var(--ink);font-size:18px;letter-spacing:-.02em;text-transform:none}
+.watchlist-summary p{margin:3px 0 0;color:var(--muted);font-size:13px}
+.watchlist-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:12px}
+.watchlist-stock{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:14px 16px}
+.watchlist-stock b{display:block;font-size:15px}.watchlist-stock small{display:block;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:170px}
+.watchlist-stock .x{all:unset;cursor:pointer;color:var(--muted);font-size:18px;padding:3px 6px;border-radius:7px}.watchlist-stock .x:hover{background:var(--soft);color:var(--avoid)}
+.watchlist-empty{padding:42px 20px;text-align:center}.watchlist-empty strong{display:block;color:var(--ink);font-size:16px;margin-bottom:5px}.watchlist-empty span{color:var(--muted);font-size:13px}
+.toggle{all:unset;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;width:32px;height:32px;border-radius:10px;color:var(--muted);font-size:15px}
+.toggle:hover{background:var(--soft);color:var(--ink)}
+.toggle:focus-visible{outline:2px solid var(--accent)}
+.scrim{display:none}
+@media (max-width:1024px){
+  .shell{grid-template-columns:1fr}
+  .wl{position:fixed;z-index:20;left:0;top:0;width:min(330px,88vw);height:100dvh;background:var(--card);box-shadow:var(--shadow);transform:translateX(-102%);transition:transform .2s;border-right:1px solid var(--line)}
+  .wl[data-open=true]{transform:none}
+  .wl-top .x,.menu{display:inline-flex}
+  .wl-items{max-height:60vh;overflow:auto}
+  .scrim{position:fixed;inset:0;z-index:15;background:rgba(10,14,22,.4);border:0}
+  .scrim[data-open=true]{display:block}
+}
 </style>
 </head>
 <body>
+<div class="shell">
+<aside class="wl" id="wl" aria-label="Watchlists" data-open="false">
+  <div class="wl-top"><button class="toggle" id="wlShrink" title="Collapse" aria-label="Collapse the watchlist panel">⟨</button><h2>Watchlists</h2><button class="x" id="wlClose" aria-label="Close watchlists">×</button></div>
+  <div class="wl-hint" id="wlHint">Choose a list to manage your stocks.</div>
+  <nav id="wlList" aria-label="Your watchlists"></nav>
+  <div class="wl-tools">
+    <button class="btn ghost" id="wlNew">+ New list</button>
+    <button class="btn ghost" id="wlRename" disabled>Rename</button>
+    <button class="btn ghost" id="wlDel" title="Delete the selected watchlist" disabled>Delete</button>
+  </div>
+</aside>
+<button class="scrim" id="scrim" aria-label="Close watchlists" data-open="false"></button>
 <div class="wrap">
   <header>
-    <div class="brand"><h1>__BRAND__</h1><p id="sub">Indian stock analysis · 8 agents on duty</p></div>
+    <div class="brand"><button class="btn ghost menu" id="wlOpen" aria-controls="wl" aria-expanded="false">☰ Watchlists</button><h1>__BRAND__</h1><p id="sub">Indian stock analysis · 8 agents on duty</p></div>
     <div class="controls">
       <span class="pill" id="fyPill"><i class="dot" id="fyDot"></i><span id="fyLabel">FYERS</span><button class="btn ghost" id="fyBtn">Connect FYERS</button></span>
       <button class="btn" id="go">Run analysis</button>
@@ -105,11 +182,25 @@ footer .foot-main{font-weight:550;color:var(--ink)}
       <ul class="list" id="res" role="listbox" aria-label="Search suggestions" hidden></ul>
     </div>
     <span class="sel" id="sel" hidden></span>
+    <button class="btn ghost" id="wlAdd" hidden>+ Watchlist</button>
     <button class="btn" id="goSel" disabled>Analyze selected</button>
   </div>
   <div id="notices"></div>
+  <div class="workspace-tabs" role="tablist" aria-label="Workspace">
+    <button class="workspace-tab" id="analysisTab" role="tab" aria-selected="true" aria-controls="analysisView">Analysis</button>
+    <button class="workspace-tab" id="watchlistTab" role="tab" aria-selected="false" aria-controls="watchlistView">Watchlist</button>
+  </div>
+  <section id="watchlistView" role="tabpanel" aria-labelledby="watchlistTab" hidden>
+    <div class="watchlist-toolbar">
+      <label for="wlSelect">Selected watchlist</label>
+      <select id="wlSelect"></select>
+    </div>
+    <div class="card watchlist-summary"><div><h2 id="wlViewName">Watchlist</h2><p id="wlViewMeta">Choose a watchlist to view its stocks.</p></div></div>
+    <section class="watchlist-grid" id="wlViewItems"></section>
+  </section>
+  <section id="analysisView" role="tabpanel" aria-labelledby="analysisTab">
   <section class="kpis" aria-label="Summary">
-    <div class="card kpi"><small>Universe</small><b id="k1">–</b><span>stocks scanned</span></div>
+    <div class="card kpi"><small>Watchlist</small><b id="k1">–</b><span>stocks scanned</span></div>
     <div class="card kpi"><small>In debate</small><b id="k2">–</b><span>shortlisted by Scout</span></div>
     <div class="card kpi"><small>Buy signals</small><b id="k3">–</b><span>verdict = BUY</span></div>
     <div class="card kpi"><small>Top pick</small><b id="k4">–</b><span id="k4s">conviction score</span></div>
@@ -117,9 +208,11 @@ footer .foot-main{font-weight:550;color:var(--ink)}
   <h2>Agent pipeline</h2>
   <section class="agents" id="agents"></section>
   <h2>Verdicts</h2>
-  <section class="feed" id="feed"><div class="card empty">No run yet. Press <b>Run analysis</b> to scan NSE stocks.</div></section>
+  <section class="feed" id="feed"><div class="card empty">No run yet. Press <b>Run analysis</b> to scan the selected watchlist.</div></section>
+  </section>
   <footer id="foot"><span class="foot-main">Analysis only. No trades are ever placed.</span>
     <span>Conviction (x/10) is an internal score, not a probability of profit. Not investment advice.</span></footer>
+</div>
 </div>
 <script nonce="__NONCE__">
 const $=s=>document.querySelector(s);
@@ -186,14 +279,16 @@ function renderRow(r){
  return row}
 
 function render(s){
- const focused=s.scope==='focused';
+ const focused=s.scope==='focused',wlp=s.watchlist;
+ if(!focused&&!wlp&&s.status==='running')$('.kpis').children[0].querySelector('small').textContent='Watchlist';
  renderAgents(s.agents,focused);
  $('.kpis').children[0].querySelector('span').textContent=focused?'selected instrument':'stocks scanned';
  $('.kpis').children[1].querySelector('span').textContent=focused?'analysed':'shortlisted by Scout';
  $('.kpis').children[2].querySelector('span').textContent=focused?'in this instrument':'verdict = BUY';
- $('.kpis').children[0].querySelector('small').textContent=focused?'Instrument':'Universe';
+ $('.kpis').children[0].querySelector('small').textContent=focused?'Instrument':(wlp&&wlp.name)||'Watchlist';
  const idle=s.status==='idle';
- const k=s.kpis;$('#k1').textContent=focused?(s.target?s.target.symbol:'–'):(k.universe||(idle?'–':0));$('#k2').textContent=idle?'–':k.in_debate;$('#k3').textContent=idle?'–':k.buys;
+ const k=s.kpis;$('#k1').textContent=focused?(s.target?s.target.symbol:'–'):(k.universe||(idle?'–':0));
+ $('#k1').title=focused?'':'Stocks in the analysed watchlist';$('#k2').textContent=idle?'–':k.in_debate;$('#k3').textContent=idle?'–':k.buys;
  $('#k4').textContent=idle?'–':(k.top_pick?k.top_pick.symbol:'–');$('#k4s').textContent=(!idle&&k.top_pick)?`${k.top_pick.verdict} · conviction ${k.top_pick.confidence}/10`:'conviction score';
  const warns=s.warnings.map(w=>h('div',{class:'banner warn'},w));
  const msg=s.status==='error'?[h('div',{class:'banner bad',role:'alert'},s.message)]:[];
@@ -210,13 +305,13 @@ function render(s){
 function startPoll(){if(!poll)poll=setInterval(tick,700);tick()}
 
 // ---- search & select: debounced, stale-response safe, keyboard accessible ----
-let chosen=null,timer=null,seq=0,items=[],active=-1;
+let chosen=null,timer=null,seq=0,items=[],active=-1,workspace='analysis';
 function closeList(){items=[];active=-1;$('#res').hidden=true;$('#res').replaceChildren();$('#q').setAttribute('aria-expanded','false');$('#q').removeAttribute('aria-activedescendant')}
 function note(t){const l=$('#res');l.replaceChildren(h('li',{class:'note',role:'presentation'},t));l.hidden=false;$('#q').setAttribute('aria-expanded','true')}
 function paintList(){$('#res').replaceChildren(...items.map((it,i)=>h('li',{id:'opt'+i,role:'option','data-i':i,'aria-selected':String(i===active),onmousedown:e=>{e.preventDefault();pick(i)},onclick:()=>pick(i)},h('span',{},h('b',{},it.symbol),' ',h('small',{},it.name)),h('small',{},`${it.exchange||''} ${it.asset_type||''}`.trim()))));$('#res').hidden=false;$('#q').setAttribute('aria-expanded','true');$('#q').setAttribute('aria-activedescendant',active>=0?'opt'+active:'')}
 function pick(i){const it=items[i];if(!it)return;chosen=it;$('#q').value='';$('#q').setAttribute('aria-expanded','false');closeList();renderSel()}
-function renderSel(){const s=$('#sel');if(!chosen){s.hidden=true;s.replaceChildren();$('#goSel').disabled=true;return}
- s.replaceChildren(h('b',{},chosen.symbol),h('small',{},`${chosen.name} · ${chosen.exchange} · ${chosen.asset_type||'EQUITY'}`),h('button',{'aria-label':'Clear selection',title:'Clear',onclick:()=>{chosen=null;renderSel();$('#q').focus()}},'×'));s.hidden=false;$('#goSel').disabled=false}
+function renderSel(){const s=$('#sel');if(!chosen){s.hidden=true;s.replaceChildren();$('#goSel').disabled=true;$('#goSel').hidden=workspace==='watchlist';$('#wlAdd').hidden=true;drawState();return}
+ s.replaceChildren(h('b',{},chosen.symbol),h('small',{},`${chosen.name} · ${chosen.exchange} · ${chosen.asset_type||'EQUITY'}`),h('button',{'aria-label':'Clear selection',title:'Clear',onclick:()=>{chosen=null;renderSel();$('#q').focus()}},'×'));s.hidden=false;$('#goSel').disabled=running;$('#goSel').hidden=workspace==='watchlist';$('#wlAdd').hidden=workspace==='watchlist'||wActive==null;$('#wlAdd').textContent='+ Watchlist';drawState()}
 async function search(){
  const q=$('#q').value.trim(),my=++seq;
  if(q.length<2){closeList();return}
@@ -246,15 +341,94 @@ $('#goSel').onclick=async()=>{if(!chosen)return;
  if(!r.ok){const d=await r.json().catch(()=>({}));notice('bad',d.message||'Could not start the focused analysis.');return}
  startPoll()};
 
-async function tick(){const s=await(await api('/api/status')).json();render(s);
- $('#go').disabled=!!s.running;$('#go').textContent=s.running?'Running…':'Run analysis';
- $('#goSel').disabled=!!s.running||!chosen;
- if(!s.running&&poll){clearInterval(poll);poll=null;loadConfig()}}
+// ---- watchlists: server-owned lists in Supabase; the run only ever names a list id ----
+let WLS=[],wActive=null,running=false;
+function renderWatchlistView(){
+ const cur=WLS.find(w=>w.id===wActive);
+ $('#wlSelect').replaceChildren(...WLS.map(w=>h('option',{value:w.id},w.name+' · '+w.count)));
+ if(cur)$('#wlSelect').value=cur.id;
+ $('#wlViewName').textContent=cur?cur.name:'No watchlist selected';
+ $('#wlViewMeta').textContent=cur?`${cur.count} stock${cur.count===1?'':'s'} · Search above to add another instrument.`:'Create a watchlist to get started.';
+ $('#wlViewItems').replaceChildren(...(cur&&cur.items.length?cur.items.map(i=>h('div',{class:'card watchlist-stock'},h('div',{},h('b',{},i.symbol),h('small',{},i.name)),h('button',{class:'x','aria-label':`Remove ${i.symbol}`,title:'Remove from watchlist',onclick:e=>{e.preventDefault();e.stopPropagation();removeStock(i.provider_symbol)}},'×'))):[h('div',{class:'card watchlist-empty'},h('strong',{},'Your watchlist is empty'),h('span',{},'Search for a stock above and choose Add to watchlist.'))]));
+}
+function setWorkspace(mode){
+ workspace=mode;
+ const analysis=mode==='analysis';
+ $('#analysisTab').setAttribute('aria-selected',String(analysis));$('#watchlistTab').setAttribute('aria-selected',String(!analysis));
+ $('#analysisView').hidden=!analysis;$('#watchlistView').hidden=analysis;
+ $('#goSel').hidden=!analysis;$('#wlAdd').hidden=analysis||!chosen||wActive==null;
+ if(!analysis)renderWatchlistView();
+ drawState();
+}
+$('#analysisTab').onclick=()=>setWorkspace('analysis');
+$('#watchlistTab').onclick=()=>setWorkspace('watchlist');
+$('#wlSelect').onchange=()=>{wActive=$('#wlSelect').value;renderWatchlists();renderWatchlistView()};
+function drawState(){const cur=WLS.find(w=>w.id===wActive),n=(cur&&cur.count)||0,empty=wActive==null||n===0;
+ const watchlistAction=workspace==='watchlist';
+ $('#go').disabled=running||(watchlistAction?!chosen:empty);$('#go').textContent=running?'Working…':watchlistAction?'Add to watchlist':empty?'Run analysis':'Run · '+cur.name;
+ $('#wlRename').disabled=!cur;$('#wlDel').disabled=!cur||WLS.length<2;
+ $('#wlHint').textContent=empty?(WLS.length?'This list is empty. Search for a stock above and add it here.':'Create your first list to start organising stocks.'):`${cur.name} · ${n} stock${n===1?'':'s'} · runs analyse this list only`;}
+function renderWatchlists(){if(window.matchMedia('(max-width:1024px)').matches)drawer(false);
+ const cur=WLS.find(w=>w.id===wActive);
+ const stockItems=w=>w.id===wActive?(w.items.length?w.items.map(i=>h('li',{},h('div',{},h('b',{},i.symbol),h('small',{},i.in_catalogue===false?i.name+' · not in current symbol list':i.name)),
+   h('button',{class:'x','aria-label':`Remove ${i.symbol}`,title:'Remove from watchlist',onclick:e=>{e.preventDefault();e.stopPropagation();removeStock(i.provider_symbol)}},'×'))):[h('li',{},h('small',{class:'stale'},'No stocks yet — add one from search.'))]):[];
+ $('#wlList').replaceChildren(...(WLS.length?WLS.map(w=>h('div',{class:'wl-group'},
+   h('button',{class:'wl-item',type:'button','aria-expanded':String(w.id===wActive),onclick:()=>selectList(w.id)},h('span',{},w.name),h('small',{},String(w.count))),
+   ...(w.id===wActive?[h('ul',{class:'wl-items',id:'wlItems','aria-label':`Stocks in ${w.name}`},...stockItems(w))]:[]))):[h('div',{class:'empty',style:'padding:20px 8px;font-size:13px'},'No watchlists yet')]));
+ drawState()}
+function applyWatchlists(d,active){WLS=d.watchlists||[];
+ if(active!=null)wActive=active;else if(!WLS.some(w=>w.id===wActive))wActive=WLS.length?WLS[0].id:null;
+ renderWatchlists();renderWatchlistView()}
+async function loadWatchlists(){try{const r=await api('/api/watchlists');const d=await r.json();
+ if(!r.ok){notice('bad',d.message||'Watchlists are unavailable.');return}
+ applyWatchlists(d)}catch(e){notice('bad','Could not load watchlists ('+e.message+').')}}
+function selectList(id){
+ if(id===wActive){wActive=null}else{wActive=id}   // click the open list again → collapse it
+ renderWatchlists();
+ if(wActive!=null&&window.matchMedia('(max-width:1024px)').matches)drawer(false)}
+function drawer(open){$('#wl').dataset.open=String(open);$('#scrim').dataset.open=String(open);$('#wlOpen').setAttribute('aria-expanded',String(open))}
+$('#wlOpen').onclick=()=>drawer(true);$('#wlClose').onclick=$('#scrim').onclick=()=>drawer(false);
+$('#wlShrink').onclick=()=>{$('#wl').classList.toggle('collapsed');renderWatchlists()};
+document.addEventListener('keydown',e=>{if(e.key==='Escape'&&$('#wl').dataset.open==='true')drawer(false)});
+async function wlSend(method,path,body){const r=await api(path,{method,body:body?JSON.stringify(body):undefined});
+ const d=await r.json().catch(()=>({}));
+ if(!r.ok){notice('bad',d.message||'Watchlist storage is unavailable right now.');return null}
+ return d}
+$('#wlNew').onclick=async()=>{const name=prompt('Name for the new watchlist:','Watchlist '+(WLS.length+1));if(!name)return;
+ const d=await wlSend('POST','/api/watchlists',{name});if(d)applyWatchlists(d,d.watchlist.id)};
+$('#wlRename').onclick=async()=>{const cur=WLS.find(w=>w.id===wActive);if(!cur)return;const name=prompt('Rename watchlist:',cur.name);if(!name||name===cur.name)return;
+ const d=await wlSend('PATCH','/api/watchlists/'+cur.id,{name});if(d)applyWatchlists(d,wActive)};
+$('#wlDel').onclick=async()=>{const cur=WLS.find(w=>w.id===wActive);if(!cur)return;
+ if(WLS.length<2){notice('warn','Keep at least one watchlist: rename or empty this one instead of deleting it.');return}
+ if(!confirm(`Delete "${cur.name}" and its ${cur.count} stock(s)?`))return;
+ const i=WLS.indexOf(cur),next=(WLS[i+1]||WLS[i-1]).id;
+ const d=await wlSend('DELETE','/api/watchlists/'+cur.id);if(d)applyWatchlists(d,next)};
+async function removeStock(sym){
+ const cur=WLS.find(w=>w.id===wActive);if(!cur)return;
+ try{
+  const d=await wlSend('DELETE','/api/watchlists/'+cur.id+'/items/'+encodeURIComponent(sym));
+  if(d){applyWatchlists(d,wActive);if(workspace==='watchlist')renderWatchlistView()}
+ }catch(e){notice('bad','Could not remove the stock. Please try again.')}
+}
+async function addToWatchlist(){if(!chosen||wActive==null)return;const sym=chosen.symbol;
+ const d=await wlSend('POST','/api/watchlists/'+wActive+'/items',{provider_symbol:chosen.provider_symbol});
+ if(d)applyWatchlists(d,wActive);
+ $('#wlAdd').textContent=d===null?'Try again':`Added ${sym} ✓`;
+ if(workspace==='watchlist')$('#go').textContent=d===null?'Try again':`Added ${sym} ✓`;
+ setTimeout(()=>{$('#wlAdd').textContent='+ Watchlist';drawState()},1600)}
+$('#wlAdd').onclick=addToWatchlist;
+
+async function tick(){const s=await(await api('/api/status')).json();running=!!s.running;render(s);drawState();
+ $('#goSel').disabled=running||!chosen;
+ if(!s.running&&poll){clearInterval(poll);poll=null;loadConfig();loadWatchlists()}}
 $('#go').onclick=async()=>{
- const r=await api('/api/start',{method:'POST',body:JSON.stringify({mode:'live'})});
- if(r.status===409){notice('warn','A run is already in progress.')}
+ if(workspace==='watchlist'){await addToWatchlist();return}
+ if(wActive==null)return;
+ const r=await api('/api/start',{method:'POST',body:JSON.stringify({mode:'live',watchlist_id:wActive})});
+ if(r.status===409){notice('warn','A run is already in progress.');return}
+ if(!r.ok){const d=await r.json().catch(()=>({}));notice('bad',d.message||'Could not start the run.');return}
  startPoll()};
-loadConfig().then(tick);
+loadConfig().then(loadWatchlists).then(tick);
 </script>
 </body>
 </html>

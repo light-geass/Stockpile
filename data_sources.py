@@ -1,15 +1,11 @@
-"""Provider-neutral data layer: universe, symbol mapping, scout screening, yfinance fundamentals."""
-import json
+﻿"""Provider-neutral data layer: watchlist entries, symbol mapping, scout screening, yfinance fundamentals."""
 import logging
 import re
-from datetime import datetime, timezone
-from pathlib import Path
 
 from evidence import empty_analyst
 
 log = logging.getLogger("datasources")
 
-BASE = Path(__file__).resolve().parent
 _NSE_EQ = re.compile(r"^NSE:(.+)-EQ$")  # greedy: hyphens belong to the ticker (BAJAJ-AUTO, M&M)
 # Trailing series tokens yfinance uses for non-equity NSE instruments ("BE" is a normal equity series).
 _YF_NON_EQ = {"ETF", "MF", "IETF", "SM", "IV", "RR", "E1", "P1", "X1", "XT", "N1", "N2", "W1", "T1"}
@@ -18,7 +14,7 @@ _YF_NON_EQ = {"ETF", "MF", "IETF", "SM", "IV", "RR", "E1", "P1", "X1", "XT", "N1
 def yf_symbol_for(fyers_symbol):
     """Map a canonical FYERS NSE cash symbol to a yfinance ticker only when nothing is guessed.
 
-    `NSE:TCS-EQ` → `TCS.NS`. Non-equity series (ETF etc.) return None so the caller reports a data gap
+    `NSE:TCS-EQ` â†’ `TCS.NS`. Non-equity series (ETF etc.) return None so the caller reports a data gap
     instead of fetching an unrelated instrument; `fyers_client.quotes()` also returns the exchange series.
     """
     m = _NSE_EQ.match(str(fyers_symbol or "").strip().upper())
@@ -30,37 +26,22 @@ def yf_symbol_for(fyers_symbol):
     return f"{m.group(1)}.NS"
 
 
-def load_universe(path=None):
-    d = json.loads(Path(path or BASE / "universe.json").read_text(encoding="utf-8"))
-    out = []
-    for bucket in ("large", "mid", "small"):
-        for e in d.get(bucket, []):
-            e = dict(e)
-            e["cap_segment"] = bucket.capitalize()
-            sym = e["symbol"]
-            e["fyers"] = f"NSE:{sym}-EQ"              # provider-specific ids live ONLY here
-            e["yf"] = yf_symbol_for(e["fyers"])        # same verified mapping as a focused run
-            out.append(e)
-    return out
+def entry_from_item(item):
+    """A stored watchlist item becomes a run entry. The provider symbol is the stored canonical one; the
+    yfinance ticker is the same verified mapping a focused run uses (None = reported as a data gap)."""
+    fyers = item["provider_symbol"]
+    return {"symbol": item["symbol"], "name": item.get("name") or item["symbol"], "sector": None,
+            "cap_segment": "Watchlist", "asset_type": item.get("asset_type"),
+            "fyers": fyers, "yf": yf_symbol_for(fyers), "news_query": item.get("name") or item["symbol"]}
 
 
-
-
-
-def screen(universe, quotes, per_bucket):
-    """Scout: deterministic Python screen. Keep top-N by day change in each bucket; skip stocks with no valid quote."""
-    shortlisted = []
-    for bucket in ("Large", "Mid", "Small"):
-        rows = []
-        for e in universe:
-            if e["cap_segment"] != bucket:
-                continue
-            q = quotes.get(e["fyers"])
-            if q and q.get("live") and q.get("day_change_pct") is not None:
-                rows.append((q["day_change_pct"], e))
-        rows.sort(key=lambda r: r[0], reverse=True)
-        shortlisted += [e for _, e in rows[:per_bucket]]
-    return shortlisted
+def screen_watchlist(entries, quotes, per_list):
+    """Scout for a watchlist: keep the top-N by day change, skipping stocks with no valid quote. There are no
+    cap buckets any more, so the per-bucket limit applies to the whole list."""
+    rows = [(q["day_change_pct"], e) for e in entries
+            for q in [quotes.get(e["fyers"])] if q and q.get("live") and q.get("day_change_pct") is not None]
+    rows.sort(key=lambda r: r[0], reverse=True)
+    return [e for _, e in rows[:per_list]]
 
 
 def _num(v):
