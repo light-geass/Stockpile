@@ -39,15 +39,6 @@ header{display:flex;flex-wrap:wrap;gap:16px;align-items:center;justify-content:s
 .btn{border:0;background:var(--accent);color:var(--accent-ink);padding:10px 20px;border-radius:999px;font:inherit;font-weight:600;cursor:pointer;transition:transform .12s,opacity .12s}
 .btn:hover:not(:disabled){transform:translateY(-1px)} .btn:disabled{opacity:.45;background:var(--soft);color:var(--muted);cursor:not-allowed;transform:none}
 .btn.ghost{background:var(--card);color:var(--ink);border:1px solid var(--line);font-weight:550;padding:8px 14px;font-size:14px}
-.wlbar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:16px;padding:12px 14px}
-.wlbar label{font-size:12.5px;letter-spacing:.04em;text-transform:uppercase;color:var(--muted)}
-.wlbar select{font:inherit;color:var(--ink);background:var(--card);border:1px solid var(--line);border-radius:10px;padding:8px 10px;max-width:280px}
-.wlbar select:focus-visible{outline:2px solid var(--accent);outline-offset:-1px}
-.wlitem{display:inline-flex;align-items:center;gap:6px;background:var(--soft);border:1px solid var(--line);border-radius:999px;padding:3px 4px 3px 10px;font-size:12.5px}
-.wlitem button{all:unset;cursor:pointer;color:var(--muted);padding:0 6px;font-size:15px;line-height:1}
-.wlitem button:focus-visible{outline:2px solid var(--accent);border-radius:6px}
-.wlitems{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
-.wlnote{color:var(--muted);font-size:13px;margin:6px 0 0}
 .pill{display:inline-flex;align-items:center;gap:8px;background:var(--card);border:1px solid var(--line);border-radius:999px;padding:6px 8px 6px 12px;font-size:13px;color:var(--muted)}
 .dot{width:9px;height:9px;border-radius:50%;background:#b8b3a6;flex:none}
 .dot.connected,.dot.done{background:var(--buy)} .dot.expired,.dot.error,.dot.unavailable{background:var(--avoid)}
@@ -114,21 +105,11 @@ footer .foot-main{font-weight:550;color:var(--ink)}
       <ul class="list" id="res" role="listbox" aria-label="Search suggestions" hidden></ul>
     </div>
     <span class="sel" id="sel" hidden></span>
-    <button class="btn ghost" id="addWl" disabled>+ Watchlist</button>
     <button class="btn" id="goSel" disabled>Analyze selected</button>
-  </div>
-  <div class="card wlbar">
-    <label for="wlSel">Run watchlist</label>
-    <select id="wlSel" aria-label="Watchlist to analyse"></select>
-    <button class="btn ghost" id="newWl">+ New list</button>
-    <button class="btn ghost" id="renameWl">Rename</button>
-    <button class="btn ghost" id="delWl">Delete list</button>
-    <span class="wlnote" id="wlNote"></span>
-    <div class="wlitems" id="wlItems"></div>
   </div>
   <div id="notices"></div>
   <section class="kpis" aria-label="Summary">
-    <div class="card kpi"><small>Watchlist</small><b id="k1">–</b><span>stocks in the list</span></div>
+    <div class="card kpi"><small>Universe</small><b id="k1">–</b><span>stocks scanned</span></div>
     <div class="card kpi"><small>In debate</small><b id="k2">–</b><span>shortlisted by Scout</span></div>
     <div class="card kpi"><small>Buy signals</small><b id="k3">–</b><span>verdict = BUY</span></div>
     <div class="card kpi"><small>Top pick</small><b id="k4">–</b><span id="k4s">conviction score</span></div>
@@ -136,7 +117,7 @@ footer .foot-main{font-weight:550;color:var(--ink)}
   <h2>Agent pipeline</h2>
   <section class="agents" id="agents"></section>
   <h2>Verdicts</h2>
-  <section class="feed" id="feed"><div class="card empty">No run yet. Pick a watchlist and press <b>Run analysis</b>.</div></section>
+  <section class="feed" id="feed"><div class="card empty">No run yet. Press <b>Run analysis</b> to scan NSE stocks.</div></section>
   <footer id="foot"><span class="foot-main">Analysis only. No trades are ever placed.</span>
     <span>Conviction (x/10) is an internal score, not a probability of profit. Not investment advice.</span></footer>
 </div>
@@ -205,20 +186,19 @@ function renderRow(r){
  return row}
 
 function render(s){
- const focused=s.scope==='focused',wl=s.watchlist;
- loadWls();                       // a finished run can have changed nothing, but counts stay in step with the DB
+ const focused=s.scope==='focused';
  renderAgents(s.agents,focused);
- $('.kpis').children[0].querySelector('span').textContent=focused?'selected instrument':'scanned in the list';
+ $('.kpis').children[0].querySelector('span').textContent=focused?'selected instrument':'stocks scanned';
  $('.kpis').children[1].querySelector('span').textContent=focused?'analysed':'shortlisted by Scout';
  $('.kpis').children[2].querySelector('span').textContent=focused?'in this instrument':'verdict = BUY';
- $('.kpis').children[0].querySelector('small').textContent=focused?'Instrument':'Watchlist';
+ $('.kpis').children[0].querySelector('small').textContent=focused?'Instrument':'Universe';
  const idle=s.status==='idle';
- const k=s.kpis;$('#k1').textContent=focused?(s.target?s.target.symbol:'–'):(wl?wl.count:(idle?'–':0));$('#k2').textContent=idle?'–':k.in_debate;$('#k3').textContent=idle?'–':k.buys;
+ const k=s.kpis;$('#k1').textContent=focused?(s.target?s.target.symbol:'–'):(k.universe||(idle?'–':0));$('#k2').textContent=idle?'–':k.in_debate;$('#k3').textContent=idle?'–':k.buys;
  $('#k4').textContent=idle?'–':(k.top_pick?k.top_pick.symbol:'–');$('#k4s').textContent=(!idle&&k.top_pick)?`${k.top_pick.verdict} · conviction ${k.top_pick.confidence}/10`:'conviction score';
  const warns=s.warnings.map(w=>h('div',{class:'banner warn'},w));
  const msg=s.status==='error'?[h('div',{class:'banner bad',role:'alert'},s.message)]:[];
  if(s.status!=='idle')$('#notices').replaceChildren(...msg,...warns);
- $('#k1').title=focused&&s.target?`${s.target.name||''} · ${s.target.exchange||''} · ${s.target.provider_symbol||''}`.trim():(wl?`Watchlist \"${wl.name}\"`:'');
+ $('#k1').title=focused&&s.target?`${s.target.name||''} · ${s.target.exchange||''} · ${s.target.provider_symbol||''}`.trim():'';
  if(s.verdicts.length)$('#feed').replaceChildren(...s.verdicts.map(renderRow));
  else if(s.status==='running')$('#feed').replaceChildren(h('div',{class:'card empty'},'Agents are working…'));
  const f=s.footer;
@@ -235,8 +215,8 @@ function closeList(){items=[];active=-1;$('#res').hidden=true;$('#res').replaceC
 function note(t){const l=$('#res');l.replaceChildren(h('li',{class:'note',role:'presentation'},t));l.hidden=false;$('#q').setAttribute('aria-expanded','true')}
 function paintList(){$('#res').replaceChildren(...items.map((it,i)=>h('li',{id:'opt'+i,role:'option','data-i':i,'aria-selected':String(i===active),onmousedown:e=>{e.preventDefault();pick(i)},onclick:()=>pick(i)},h('span',{},h('b',{},it.symbol),' ',h('small',{},it.name)),h('small',{},`${it.exchange||''} ${it.asset_type||''}`.trim()))));$('#res').hidden=false;$('#q').setAttribute('aria-expanded','true');$('#q').setAttribute('aria-activedescendant',active>=0?'opt'+active:'')}
 function pick(i){const it=items[i];if(!it)return;chosen=it;$('#q').value='';$('#q').setAttribute('aria-expanded','false');closeList();renderSel()}
-function renderSel(){const s=$('#sel');if(!chosen){s.hidden=true;s.replaceChildren();$('#goSel').disabled=!!(curRun&&curRun.running);$('#addWl').disabled=!!(curRun&&curRun.running);return}
- s.replaceChildren(h('b',{},chosen.symbol),h('small',{},`${chosen.name} · ${chosen.exchange} · ${chosen.asset_type||'EQUITY'}`),h('button',{'aria-label':'Clear selection',title:'Clear',onclick:()=>{chosen=null;renderSel();$('#q').focus()}},'×'));s.hidden=false;$('#goSel').disabled=!!(curRun&&curRun.running);$('#addWl').disabled=!!(curRun&&curRun.running)}
+function renderSel(){const s=$('#sel');if(!chosen){s.hidden=true;s.replaceChildren();$('#goSel').disabled=true;return}
+ s.replaceChildren(h('b',{},chosen.symbol),h('small',{},`${chosen.name} · ${chosen.exchange} · ${chosen.asset_type||'EQUITY'}`),h('button',{'aria-label':'Clear selection',title:'Clear',onclick:()=>{chosen=null;renderSel();$('#q').focus()}},'×'));s.hidden=false;$('#goSel').disabled=false}
 async function search(){
  const q=$('#q').value.trim(),my=++seq;
  if(q.length<2){closeList();return}
@@ -266,94 +246,15 @@ $('#goSel').onclick=async()=>{if(!chosen)return;
  if(!r.ok){const d=await r.json().catch(()=>({}));notice('bad',d.message||'Could not start the focused analysis.');return}
  startPoll()};
 
-// ---- watchlists (stored in PostgreSQL; the dashboard only ever sends ids and provider symbols) ----
-let wlData=null,activeWl=null,curRun=null;
-function wlState(){return (wlData&&wlData.watchlists||[]).find(w=>w.id===activeWl)||null}
-function saveActive(id){activeWl=id;try{localStorage.setItem('sd_watchlist',id||'')}catch(e){}}
-function loadActive(){try{return localStorage.getItem('sd_watchlist')||null}catch(e){return null}}
-async function readErr(r,fallback){const d=await r.json().catch(()=>({}));return d.message||d.error||fallback}
-async function loadWls(selectId){
- let r;try{r=await api('/api/watchlists')}catch(e){return}
- const d=await r.json().catch(()=>({}));wlData=d;
- if(!d.ready){$('#wlSel').replaceChildren(h('option',{},'Watchlists unavailable'));$('#wlSel').disabled=true;$('#wlItems').replaceChildren();
-  $('#wlNote').textContent=d.message||'Watchlist storage is not configured.';renderWl();return}
- $('#wlSel').disabled=false;
- const rows=d.watchlists||[];
- const want=selectId||activeWl||loadActive();
- activeWl=rows.some(w=>w.id===want)?want:(d.default_id||(rows[0]&&rows[0].id)||null);saveActive(activeWl);
- $('#wlSel').replaceChildren(...(rows.length?rows.map(w=>h('option',{value:w.id,selected:w.id===activeWl?'':false},`${w.name} (${w.count})`)):[h('option',{},'No watchlist yet')]));
- $('#wlSel').value=activeWl||'';
- if(activeWl)await loadWlItems();else renderWl();
-}
-async function loadWlItems(){
- if(!activeWl){$('#wlItems').replaceChildren();renderWl();return}
- let r;try{r=await api('/api/watchlists/'+encodeURIComponent(activeWl))}catch(e){return}
- if(!r.ok){$('#wlItems').replaceChildren();$('#wlNote').textContent=await readErr(r,'Could not load this watchlist.');activeWl=null;saveActive('');renderWl();return}
- const d=await r.json();
- const it=(d.items||[]).map(x=>h('span',{class:'wlitem',title:x.name||x.symbol},h('b',{},x.symbol),
-   h('button',{'aria-label':'Remove '+x.symbol+' from '+d.name,title:'Remove',onclick:()=>removeItem(x.provider_symbol)},'×')));
- $('#wlItems').replaceChildren(...(it.length?it:[h('span',{class:'wlnote'},'This watchlist is empty. Search a stock and press “+ Watchlist”.')]));
- $('#wlNote').textContent=`${d.name}: ${(d.items||[]).length} stock${(d.items||[]).length===1?'':'s'}`;
- renderWl();
-}
-function renderWl(){
- const w=wlState(),empty=!w||!w.count,idle=!(curRun&&curRun.running);
- $('#go').disabled=!idle||empty||!(wlData&&wlData.ready);
- $('#k1').textContent=w?w.count:(wlData&&wlData.ready?'0':'–');
- $('#go').title=empty?'A watchlist needs at least one stock before it can be analysed.':'';
- $('#delWl').disabled=!idle||!(wlData&&wlData.watchlists&&wlData.watchlists.length>1);
-}
-async function removeItem(ps){
- if(!activeWl)return;
- const r=await api('/api/watchlists/'+encodeURIComponent(activeWl)+'/items/'+encodeURIComponent(ps),{method:'DELETE'});
- if(!r.ok){notice('bad',await readErr(r,'Could not remove that stock.'))}
- await loadWls(activeWl);
-}
-$('#wlSel').onchange=()=>{saveActive($('#wlSel').value);loadWlItems()};
-$('#addWl').onclick=async()=>{
- if(!chosen)return;
- if(!wlData||!wlData.ready){notice('bad','Watchlist storage is not available right now.');return}
- if(!activeWl){notice('warn','Create a watchlist first.');return}
- const r=await api('/api/watchlists/'+encodeURIComponent(activeWl)+'/items',{method:'POST',body:JSON.stringify({provider_symbol:chosen.provider_symbol})});
- if(!r.ok){notice(r.status===409?'warn':'bad',await readErr(r,'Could not add that stock.'));return}
- await loadWls(activeWl);
- const n=(wlState()||{}).count||0;notice('good',`${chosen.symbol} added to “${(wlState()||{}).name||'watchlist'}” (${n} stock${n===1?'':'s'}).`)
-};
-$('#newWl').onclick=async()=>{
- const name=prompt('Name for the new watchlist:','Watchlist '+(((wlData&&wlData.watchlists)||[]).length+1));
- if(name==null)return;
- const r=await api('/api/watchlists',{method:'POST',body:JSON.stringify({name})});
- if(!r.ok){notice('bad',await readErr(r,'Could not create the watchlist.'));return}
- const d=await r.json();await loadWls(d.id);notice('good',`Created “${d.name}”.`)
-};
-$('#renameWl').onclick=async()=>{
- const w=wlState();if(!activeWl||!w)return;
- const name=prompt('New name for this watchlist:',w.name);
- if(name==null)return;
- const r=await api('/api/watchlists/'+encodeURIComponent(activeWl),{method:'PATCH',body:JSON.stringify({name})});
- if(!r.ok){notice('bad',await readErr(r,'Could not rename the watchlist.'));return}
- await loadWls(activeWl);
-};
-$('#delWl').onclick=async()=>{
- const w=wlState();if(!activeWl||!w)return;
- if(!confirm(`Delete “${w.name}” and its ${w.count} stock(s)?`))return;
- const r=await api('/api/watchlists/'+encodeURIComponent(activeWl),{method:'DELETE'});
- if(!r.ok){notice('bad',await readErr(r,'Could not delete the watchlist.'));return}
- saveActive('');await loadWls();notice('good',`Deleted “${w.name}”.`)
-};
-
-async function tick(){const s=await(await api('/api/status')).json();curRun=s;render(s);
- $('#go').textContent=s.running?'Running…':'Run analysis';
- $('#goSel').disabled=!!s.running||!chosen;$('#addWl').disabled=!!s.running||!chosen;
- renderWl();
+async function tick(){const s=await(await api('/api/status')).json();render(s);
+ $('#go').disabled=!!s.running;$('#go').textContent=s.running?'Running…':'Run analysis';
+ $('#goSel').disabled=!!s.running||!chosen;
  if(!s.running&&poll){clearInterval(poll);poll=null;loadConfig()}}
 $('#go').onclick=async()=>{
- let body={mode:'live'};
- if(activeWl)body.watchlist_id=activeWl;
- const r=await api('/api/start',{method:'POST',body:JSON.stringify(body)});
- if(!r.ok){notice(r.status===409?'warn':'bad',await readErr(r,'Could not start the run.'));return}
+ const r=await api('/api/start',{method:'POST',body:JSON.stringify({mode:'live'})});
+ if(r.status===409){notice('warn','A run is already in progress.')}
  startPoll()};
-loadConfig().then(()=>loadWls()).then(()=>tick());
+loadConfig().then(tick);
 </script>
 </body>
 </html>

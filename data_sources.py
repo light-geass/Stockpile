@@ -1,7 +1,8 @@
-"""Provider-neutral data layer: symbol mapping, scout screening, yfinance fundamentals. No stock list lives here:
-watchlists are stored in PostgreSQL (watchlists.py) and focused runs use the FYERS catalogue."""
+"""Provider-neutral data layer: universe, symbol mapping, scout screening, yfinance fundamentals."""
+import json
 import logging
 import re
+from datetime import datetime, timezone
 from pathlib import Path
 
 from evidence import empty_analyst
@@ -29,21 +30,30 @@ def yf_symbol_for(fyers_symbol):
     return f"{m.group(1)}.NS"
 
 
-def bucket_order(entries):
-    """Cap buckets in pipeline order, then any other value alphabetically (custom lists may carry no bucket)."""
-    seen = {str(e.get("cap_segment") or "") for e in entries}
-    return [b for b in ("Large", "Mid", "Small") if b in seen] + sorted(b for b in seen if b not in ("Large", "Mid", "Small"))
+def load_universe(path=None):
+    d = json.loads(Path(path or BASE / "universe.json").read_text(encoding="utf-8"))
+    out = []
+    for bucket in ("large", "mid", "small"):
+        for e in d.get(bucket, []):
+            e = dict(e)
+            e["cap_segment"] = bucket.capitalize()
+            sym = e["symbol"]
+            e["fyers"] = f"NSE:{sym}-EQ"              # provider-specific ids live ONLY here
+            e["yf"] = yf_symbol_for(e["fyers"])        # same verified mapping as a focused run
+            out.append(e)
+    return out
+
+
+
 
 
 def screen(universe, quotes, per_bucket):
-    """Scout: deterministic Python screen over a watchlist. Keep the top-N by day change per cap bucket (Large, Mid,
-    Small; anything else is its own bucket so a custom watchlist still shortlists). Stocks with no valid quote are
-    skipped — they are reported separately by the caller."""
+    """Scout: deterministic Python screen. Keep top-N by day change in each bucket; skip stocks with no valid quote."""
     shortlisted = []
-    for bucket in bucket_order(universe):
+    for bucket in ("Large", "Mid", "Small"):
         rows = []
         for e in universe:
-            if (e.get("cap_segment") or "") != bucket:
+            if e["cap_segment"] != bucket:
                 continue
             q = quotes.get(e["fyers"])
             if q and q.get("live") and q.get("day_change_pct") is not None:

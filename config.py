@@ -48,16 +48,6 @@ def _s(name, default=""):
     return os.environ.get(name, "").strip() or default
 
 
-def database_url():
-    """Server-side Supabase/Postgres URL. The dashboard labels have varied (`SUPABASE_DATABASE_URL`,
-    `DATABASE_CONNECTION_STRING`), so the first usable one wins in this order and none is ever sent to the browser."""
-    for name in ("DATABASE_URL", "SUPABASE_DATABASE_URL", "DATABASE_CONNECTION_STRING"):
-        v = _s(name)
-        if v.startswith(("postgres://", "postgresql://")):
-            return v
-    return ""
-
-
 def local_secret(name, env_value=""):
     """Return env value, else a random secret persisted (0600) in the gitignored .local dir."""
     if env_value:
@@ -103,8 +93,6 @@ class Settings:
     groq_timeout: float
     instrument_catalogue_url: str
     instrument_catalogue_ttl: int
-    database_url: str
-    watchlist_max_items: int
     data_dir: Path
 
     @classmethod
@@ -136,8 +124,6 @@ class Settings:
             groq_timeout=_f("GROQ_TIMEOUT", 60),
             instrument_catalogue_url=_s("INSTRUMENT_CATALOGUE_URL", "https://public.fyers.in/sym_details/NSE_CM.csv"),
             instrument_catalogue_ttl=_i("INSTRUMENT_CATALOGUE_TTL", 21600),  # 6 h; file changes far slower
-            database_url=database_url(),
-            watchlist_max_items=_i("WATCHLIST_MAX_ITEMS", 100),
             data_dir=Path(_s("DATA_DIR", str(DATA_DIR))).resolve(),
         )
 
@@ -167,16 +153,6 @@ class Settings:
     def telegram_ready(self):
         return bool(self.telegram_enabled and self.telegram_bot_token and self.telegram_chat_id)
 
-    @property
-    def db_ready(self):
-        """True when a real connection string was given. A bare Supabase project URL is a configuration mistake, not
-        a database, and is reported as such instead of being handed to the driver."""
-        return bool(self.database_url) and self.database_url.startswith(("postgres://", "postgresql://"))
-
     def secret_values(self):
-        # Every database URL carries its password: redact any of them, under any of the accepted names.
-        vals = [v for v in (self.fyers_app_secret, self.fyers_access_token, self.flask_secret_key,
-                            self.dashboard_access_key, self.groq_api_key, self.telegram_bot_token,
-                            self.database_url) if v]
-        extra = _s("DATABASE_CONNECTION_STRING")
-        return vals + ([extra] if extra and extra not in vals else [])
+        return [v for v in (self.fyers_app_secret, self.fyers_access_token, self.flask_secret_key,
+                            self.dashboard_access_key, self.groq_api_key, self.telegram_bot_token) if v]

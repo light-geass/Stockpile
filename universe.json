@@ -1,0 +1,33 @@
+{
+  "_note": "Editable. Buckets are your own grouping, not an official cap classification. Verify each symbol exists in the FYERS symbol master (NSE:<SYMBOL>-EQ); override with a 'fyers' key where needed.",
+  "large": [
+    {"symbol": "RELIANCE", "name": "Reliance Industries", "sector": "Energy"},
+    {"symbol": "TCS", "name": "Tata Consultancy Services", "news_query": "TCS", "sector": "IT"},
+    {"symbol": "HDFCBANK", "name": "HDFC Bank", "sector": "Financials"},
+    {"symbol": "INFY", "name": "Infosys", "sector": "IT"},
+    {"symbol": "ICICIBANK", "name": "ICICI Bank", "sector": "Financials"},
+    {"symbol": "SBIN", "name": "State Bank of India", "sector": "Financials"},
+    {"symbol": "ITC", "name": "ITC Limited", "news_query": "ITC Limited", "sector": "FMCG"},
+    {"symbol": "LT", "name": "Larsen & Toubro", "sector": "Industrials"}
+  ],
+  "mid": [
+    {"symbol": "POLYCAB", "name": "Polycab India", "sector": "Industrials"},
+    {"symbol": "MPHASIS", "name": "Mphasis", "sector": "IT"},
+    {"symbol": "VOLTAS", "name": "Voltas", "sector": "Consumer Durables"},
+    {"symbol": "CUMMINSIND", "name": "Cummins India", "sector": "Industrials"},
+    {"symbol": "PERSISTENT", "name": "Persistent Systems", "sector": "IT"},
+    {"symbol": "COFORGE", "name": "Coforge", "sector": "IT"},
+    {"symbol": "ASHOKLEY", "name": "Ashok Leyland", "sector": "Autos"},
+    {"symbol": "BHARATFORG", "name": "Bharat Forge", "sector": "Autos"}
+  ],
+  "small": [
+    {"symbol": "IRCON", "name": "Ircon International", "sector": "Infrastructure"},
+    {"symbol": "NBCC", "name": "NBCC India", "sector": "Infrastructure"},
+    {"symbol": "HFCL", "name": "HFCL", "sector": "Telecom"},
+    {"symbol": "RAILTEL", "name": "RailTel Corporation", "sector": "Telecom"},
+    {"symbol": "GRSE", "name": "Garden Reach Shipbuilders", "sector": "Defence"},
+    {"symbol": "CDSL", "name": "Central Depository Services", "sector": "Financials"},
+    {"symbol": "ITI", "name": "ITI Limited", "news_query": "ITI Limited", "sector": "Telecom"},
+    {"symbol": "TITAGARH", "name": "Titagarh Rail Systems", "sector": "Industrials"}
+  ]
+}
