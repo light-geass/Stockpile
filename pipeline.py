@@ -7,7 +7,6 @@ from datetime import datetime, timezone
 
 import data_sources as ds
 import evidence as ev
-import chart_patterns as cp
 import llm
 import news as newsmod
 from fyers_client import FyersClient, FyersError
@@ -197,12 +196,9 @@ class Pipeline:
                 daily = self._fyers_call(provider.daily_candles, e["fyers"])
                 intra = self._fyers_call(provider.intraday_candles, e["fyers"]) if session == "open" else None
                 technicals, rng, gaps = ev.technicals_from_daily(daily, quotes[e["fyers"]], intra, session)
-                out[e["symbol"]] = (technicals, rng, gaps, cp.analyze(daily))
+                out[e["symbol"]] = (technicals, rng, gaps)
             except FyersError as err:  # _fyers_call already re-raised rate limits/auth as RunAbort
-                out[e["symbol"]] = (None, None, [f"technicals({err.kind})"],
-                                             {"timeframe": "1D", "detector_version": cp.DETECTOR_VERSION,
-                                              "available": False, "patterns": [],
-                                              "limitations": [f"candle request failed: {err.kind}"]})
+                out[e["symbol"]] = (None, None, [f"technicals({err.kind})"])
         rv = [t[0]["rvol"] for t in out.values() if t[0] and t[0].get("rvol")]
         self._agent("technician", "done", analyzed=len(out),
                     **{"avg RVOL" if len(out) > 1 else "RVOL": f"{sum(rv) / len(rv):.2f}x" if rv else "n/a"})
@@ -316,13 +312,9 @@ class Pipeline:
         nb, ng = news_block
         src = {"price": "fyers", "candles": "fyers", "analyst": "yfinance",
                "news": "google_news+yfinance+gdelt" if yf_sym else "google_news+gdelt"}
-        chart = tech[3] if len(tech) > 3 else None
         bundle = ev.assemble_bundle(entry, quote, t, rng, an, nb, src, retrieved,
                                    list(tg or []) + list(fg) + list(ng),
                                    max_age=self.s.quote_max_age_sec, session=session)
-        bundle["chart"] = chart or {"timeframe": "1D", "detector_version": cp.DETECTOR_VERSION,
-                                   "available": False, "patterns": [],
-                                   "limitations": ["chart analysis unavailable"]}
         return bundle
 
     def _record_focused(self, bundles, run_id):
