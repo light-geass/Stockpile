@@ -6,6 +6,8 @@
 data/
 *.sqlite3
 *.log
+*.err
+_ui.*
 __pycache__/
 *.pyc
 .pytest_cache/

@@ -23,10 +23,14 @@ from instrument_search import (CatalogueError, InstrumentCatalogue, MAX_QUERY as
 from pipeline import Pipeline
 from security import install_log_redaction, redact
 from storage import Store
+import watchlists as wl
 
 log = logging.getLogger("app")
 BASE = Path(__file__).resolve().parent
 PUBLIC_ENDPOINTS = {"healthz", "fyers_callback", "unlock"}
+# Watchlist request failures -> HTTP status. 'invalid'/'empty' are the caller's fault, everything else is the store's.
+WATCHLIST_STATUS = {"not_configured": 503, "invalid_url": 503, "unavailable": 503, "not_found": 404,
+                    "duplicate": 409, "full": 409, "limit": 409, "empty": 409, "invalid": 400}
 FWD_HEADERS = ("X-Forwarded-For", "X-Forwarded-Host", "X-Forwarded-Proto", "Forwarded")
 # ?auth=<kind> on return from the OAuth callback, rendered by the dashboard through /api/auth-notice/<kind>.
 AUTH_NOTICES = {
@@ -52,6 +56,16 @@ def _route_yfinance_proxy(s):
             return
 
 
+def _seed_watchlists(lists, settings):
+    """One-time import of the old default list as "Watchlist 1". Failures are logged and retried on next boot."""
+    try:
+        lists.ensure_seeded()
+    except wl.WatchlistError as e:  # database down at boot is not fatal: the dashboard reports it
+        log.warning("watchlist seed skipped (%s)", e.kind)
+    except Exception as e:  # pragma: no cover - defensive
+        log.warning("watchlist seed crashed: %s", redact(f"{type(e).__name__}: {e}", settings.secret_values()))
+
+
 class HostAwareSessionInterface(SecureCookieSessionInterface):
     """Secure cookie flag per request: True on the HTTPS tunnel host, False on plain loopback (browsers drop Secure cookies there)."""
 
@@ -74,17 +88,24 @@ def create_app(settings=None, deps=None, store_path=None):
 
     store = Store(store_path or (s.data_dir / "audit.sqlite3"), s.secret_values())
     auth = FyersAuth(s, TokenStore(config.LOCAL_DIR / "fyers_token.json"), (deps or {}).get("http", __import__("requests")))
-    pipe = Pipeline(s, auth, store, deps)
+    lists = (deps or {}).get("lists") or wl.store_from_settings(s)
+    pipe = Pipeline(s, auth, store, deps, lists=lists)
     catalogue = (deps or {}).get("catalogue") or InstrumentCatalogue(s.instrument_catalogue_url,
                                                                      s.instrument_catalogue_ttl)
-    app.extensions.update(auth=auth, pipeline=pipe, store=store, catalogue=catalogue)
+    app.extensions.update(auth=auth, pipeline=pipe, store=store, catalogue=catalogue, lists=lists)
     threading.Thread(target=catalogue.ensure_loaded, daemon=True, name="catalogue-warmup").start()
+    if s.db_ready:  # import the old default list once, then migrate-and-serve on later boots
+        threading.Thread(target=_seed_watchlists, args=(lists, s), daemon=True, name="watchlist-seed").start()
+    else:
+        log.warning("No PostgreSQL connection string (SUPABASE_DATABASE_URL/DATABASE_URL): watchlists are unavailable.")
     unlock_attempts = []  # timestamps (global limiter: tunnel brute-force guard)
     search_attempts = []  # timestamps (per-session throttle for the symbol master download trigger)
 
     # ---------------- request classification ----------------
     def allowed_hosts():
         h = {f"127.0.0.1:{s.port}", f"localhost:{s.port}", f"[::1]:{s.port}", "127.0.0.1", "localhost"}
+        if s.host not in ("127.0.0.1", "localhost", "[::1]"):
+            h.add(f"{s.host.lower()}:{s.port}")  # a remote-bind host (e.g. 0.0.0.0 in a container) answers on its own IP
         if s.tunnel_host:
             h.add(s.tunnel_host)
         return h
@@ -188,12 +209,102 @@ def create_app(settings=None, deps=None, store_path=None):
 
     @app.post("/api/start")
     def api_start():
-        mode = (request.get_json(silent=True) or {}).get("mode", "live")
+        """Analyse one stored watchlist. The browser names a list id only; the stocks are read from PostgreSQL."""
+        body = request.get_json(silent=True) or {}
+        mode = body.get("mode", "live")
         if mode != "live":
             return jsonify(error="bad_mode", message="mode must be live"), 400
-        if not pipe.start("live"):
+        wid = body.get("watchlist_id")
+        if wid is not None and (not isinstance(wid, str) or not wid or len(wid) > 64):
+            return jsonify(error="bad_watchlist", message="Pick a watchlist to analyse."), 400
+        try:
+            current = lists.get(wid) if wid else _first_list(lists)
+        except wl.WatchlistError as e:
+            return jsonify(error=e.kind, message=str(e)), WATCHLIST_STATUS.get(e.kind, 500)
+        if not current["items"]:
+            return jsonify(error="empty", message=f'"{current["name"]}" has no stocks. Add some first.'), 409
+        ref = {"id": current["id"], "name": current["name"]}
+        if not pipe.start("live", watchlist=ref):
             return jsonify(error="busy", message="A run is already in progress."), 409
-        return jsonify(started=True, mode="live"), 202
+        return jsonify(started=True, mode="live", scope="watchlist", watchlist=ref), 202
+
+    # ---------------- watchlists (PostgreSQL) ----------------
+    def _list_error(e):
+        log.warning("watchlist request failed: %s", e.kind)
+        return jsonify(error=e.kind, message=str(e)), WATCHLIST_STATUS.get(e.kind, 500)
+
+    def _json_body():
+        body = request.get_json(silent=True)
+        return body if isinstance(body, dict) else {}
+
+    def _first_list(store):
+        uid = store.first_id()
+        if not uid:
+            raise wl.WatchlistError("not_found", "No watchlist exists yet.")
+        return store.get(uid)
+
+    @app.get("/api/watchlists")
+    def api_watchlists():
+        """Sidebar data. `ready` is False (with a reason) when the database is not configured or unreachable."""
+        try:
+            rows = lists.lists()
+        except wl.WatchlistError as e:
+            code = 503 if e.kind in ("unavailable", "invalid_url") else 200
+            return jsonify(ready=False, error=e.kind, message=str(e), watchlists=[]), code
+        first = rows[0]["id"] if rows else None
+        return jsonify(ready=True, default_id=first, max_items=s.watchlist_max_items, watchlists=rows)
+
+    @app.get("/api/watchlists/<wid>")
+    def api_watchlist_get(wid):
+        try:
+            return jsonify(lists.get(wid))
+        except wl.WatchlistError as e:
+            return _list_error(e)
+
+    @app.post("/api/watchlists")
+    def api_watchlist_create():
+        try:
+            return jsonify(lists.create(_json_body().get("name"))), 201
+        except wl.WatchlistError as e:
+            return _list_error(e)
+
+    @app.patch("/api/watchlists/<wid>")
+    def api_watchlist_rename(wid):
+        try:
+            return jsonify(lists.rename(wid, _json_body().get("name")))
+        except wl.WatchlistError as e:
+            return _list_error(e)
+
+    @app.delete("/api/watchlists/<wid>")
+    def api_watchlist_delete(wid):
+        try:
+            lists.delete(wid)
+            return jsonify(deleted=True)
+        except wl.WatchlistError as e:
+            return _list_error(e)
+
+    @app.post("/api/watchlists/<wid>/items")
+    def api_watchlist_add_item(wid):
+        """The browser names a provider symbol; name/exchange/type come from the cached FYERS catalogue only."""
+        body = _json_body()
+        ref = body.get("provider_symbol")
+        if not isinstance(ref, str) or not ref or len(ref) > 60:
+            return jsonify(error="bad_instrument", message="Select an instrument from the search list."), 400
+        instrument = catalogue.get_if_fresh(ref)
+        if instrument is None:
+            return jsonify(error="unknown_instrument",
+                           message="That instrument is not in the current NSE symbol list."), 400
+        try:
+            return jsonify(lists.add_item(wid, instrument, body.get("cap_segment"))), 201
+        except wl.WatchlistError as e:
+            return _list_error(e)
+
+    @app.delete("/api/watchlists/<wid>/items/<path:provider_symbol>")
+    def api_watchlist_remove_item(wid, provider_symbol):
+        try:
+            return jsonify(lists.remove_item(wid, provider_symbol))
+        except wl.WatchlistError as e:
+            return _list_error(e)
 
     # ---------------- search & select (focused analysis) ----------------
     @app.get("/api/instruments/search")

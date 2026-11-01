@@ -9,6 +9,7 @@ import data_sources as ds
 import evidence as ev
 import llm
 import news as newsmod
+import watchlists as wl
 from fyers_client import FyersClient, FyersError
 from grounding import build_facts
 from notifier import Telegram, format_buy, format_summary
@@ -17,7 +18,7 @@ from storage import Store
 
 log = logging.getLogger("pipeline")
 AGENTS = [
-    ("scout", "Scout", "Screens the universe by day move"),
+    ("scout", "Scout", "Screens the watchlist by day move"),
     ("technician", "Technician", "RVOL, trend, 52-week range"),
     ("fundamentalist", "Fundamentalist", "Analyst consensus and targets"),
     ("newsdesk", "Newsdesk", "Fresh headlines and tone"),
@@ -33,18 +34,21 @@ class RunAbort(Exception):
 
 
 class Pipeline:
-    def __init__(self, settings, auth, store: Store, deps=None):
+    def __init__(self, settings, auth, store: Store, deps=None, lists=None):
         self.s, self.auth, self.store = settings, auth, store
         self.deps = deps or {}
+        # Watchlists live in PostgreSQL; a test suite injects its own store through deps['lists'].
+        self.lists = lists or self.deps.get("lists") or wl.store_from_settings(settings)
         self.lock = threading.Lock()
         self.running = False
         self._yf_map = {}
         self._reset()
 
     # ---------- state ----------
-    def _reset(self, scope="universe", target=None):
+    def _reset(self, scope="watchlist", target=None, watchlist=None):
         self.state = {"status": "idle", "mode": "live", "scope": scope, "target": target,
-                      "message": "Ready. Press Run analysis to start.",
+                      "watchlist": watchlist,
+                      "message": "Ready. Pick a watchlist and press Run analysis to start.",
                       "agents": {k: {"name": n, "role": r, "status": "offline", "stats": {}} for k, n, r in AGENTS},
                       "kpis": {"universe": 0, "in_debate": 0, "buys": 0, "top_pick": None},
                       "verdicts": [], "warnings": [], "footer": None, "engine": None, "pulled_at": None}
@@ -74,44 +78,46 @@ class Pipeline:
             time.sleep(self.s.agent_delay)
 
     # ---------- control ----------
-    def start(self, mode, target=None):
-        """target=None → scan the universe; a canonical instrument dict → focused single-name run."""
+    def start(self, mode, target=None, watchlist=None):
+        """target → focused single-instrument run; watchlist={id,name} → that list's stocks; neither → the first list."""
         with self.lock:
             if self.running:
                 return False
             self.running = True
             target = copy.deepcopy(target) if target is not None else None  # caller may mutate its dict
-        threading.Thread(target=self._thread, args=(mode, target), daemon=True).start()
+            watchlist = dict(watchlist) if watchlist is not None else None
+        threading.Thread(target=self._thread, args=(mode, target, watchlist), daemon=True).start()
         return True
 
-    def _thread(self, mode, target=None):
+    def _thread(self, mode, target=None, watchlist=None):
         try:
-            self.run(mode, target)
+            self.run(mode, target, watchlist)
         finally:
             with self.lock:
                 self.running = False
 
-    def run(self, mode="live", target=None):
+    def run(self, mode="live", target=None, watchlist=None):
         """Blocking run. Never raises: failures land in state['status']='error' with a safe message.
 
-        target=None scans universe.json. With a canonical instrument dict, only that instrument is analysed
-        (scope='focused') and the Messenger/Telegram stage is skipped entirely.
+        target set → only that instrument is analysed (scope='focused'), Messenger/Telegram is skipped entirely.
+        watchlist={id,name} → the stocks stored in that list (scope='watchlist'): it is loaded and validated on the
+        server and there is no fallback to another list. watchlist=None → the first stored list (legacy callers).
         """
         focused = target is not None
-        scope = "focused" if focused else "universe"
+        scope = "focused" if focused else "watchlist"
         brief = ({k: target.get(k) for k in ("symbol", "name", "exchange", "asset_type", "provider_symbol")}
                  if focused else None)
         # Mark running and flip the state in ONE critical section: start() has already set running=True on the
         # caller's thread, so a fast run could otherwise clear it before the state said "running" (a poller then
         # saw running=False with status='running' for ever).
-        self._reset(scope, brief)
+        self._reset(scope, brief, dict(watchlist) if (watchlist and not focused) else None)
         with self.lock:
             self.running = True
             self.state.update(status="running", mode="live", message="Run started.")
         run_id = self.store.start_run(scope)
         engine_label, uni_n, short_n, summary = None, 0, 0, {}
         try:
-            bundles, uni_n = self._collect_focused(target) if focused else self._collect_live()
+            bundles, uni_n = self._collect_focused(target) if focused else self._collect_watchlist(watchlist)
             short_n = len(bundles)
             self._debate(bundles, run_id)
             if focused:
@@ -134,7 +140,7 @@ class Pipeline:
             snap = self.snapshot()
             self.store.finish_run(run_id, snap["status"], engine_label, uni_n, short_n,
                                   {"kpis": snap["kpis"], "warnings": snap["warnings"],
-                                   "scope": scope, "target": brief})
+                                   "scope": scope, "target": brief, "watchlist": snap.get("watchlist")})
             with self.lock:
                 self.running = False
 
@@ -158,7 +164,7 @@ class Pipeline:
                 raise RunAbort(e.message)
             raise
 
-    # ---------- shared agent stages (universe scan and focused run use the same code) ----------
+    # ---------- shared agent stages (watchlist scan and focused run use the same code) ----------
     def _provider(self):
         if not self.auth.get_token():
             self._agent("scout", "error")
@@ -198,7 +204,7 @@ class Pipeline:
         self._agent("fundamentalist", "working")
         out, yf_map = {}, {}
         for e in entries:
-            if "yf" not in e:  # focused entries are built from a searched symbol, not universe.json
+            if "yf" not in e:  # focused entries are built from a searched symbol, not a stored watchlist item
                 e["yf"] = ds.yf_symbol_for(e["fyers"])
             yf_map[e["symbol"]] = e["yf"]
             sym = yf_map[e["symbol"]]
@@ -232,19 +238,38 @@ class Pipeline:
         if session != "open":
             self._warn("Market is closed (scheduled NSE hours; holidays not modelled): data is last-session, so no alerts fire.")
 
-    def _collect_live(self):
-        provider = self._provider()
-        universe = ds.load_universe()
-        self._agent("scout", "working")
-        quotes = self._fyers_call(provider.quotes, [e["fyers"] for e in universe])
-        short = ds.screen(universe, quotes, self.s.shortlist_per_bucket)
+    def _collect_watchlist(self, watchlist):
+        """Scout over one stored watchlist. Universe/focused behaviour of the other stages is unchanged."""
+        try:
+            self._agent("scout", "working")
+            if watchlist and watchlist.get("id"):
+                saved = self.lists.get(watchlist.get("id"))
+            else:  # legacy start without an id: use the first stored list, never a hard-coded one
+                uid = self.lists.first_id()
+                if not uid:
+                    raise wl.WatchlistError("empty", "No watchlist exists yet. Create one and add stocks first.")
+                saved = self.lists.get(uid)
+            self._set(watchlist={"id": saved["id"], "name": saved["name"], "count": len(saved["items"])})
+            if not saved["items"]:
+                self._agent("scout", "error")
+                raise RunAbort(f"Watchlist \"{saved['name']}\" has no stocks. Add some and run again.")
+            entries = [wl.to_entry(i) for i in saved["items"]]
+        except wl.WatchlistError as e:
+            self._agent("scout", "error")
+            raise RunAbort(str(e))
+        name = self.state["watchlist"]["name"]
+        provider = self._provider()   # connect check first: a storage problem is fixed after it, not instead of it
+        quotes = self._fyers_call(provider.quotes, [e["fyers"] for e in entries])
+        short = ds.screen(entries, quotes, self.s.shortlist_per_bucket)
         retrieved = datetime.now(timezone.utc)
         self._agent("scout", "done", scanned=len(quotes), shortlisted=len(short))
         self._set(pulled_at=ev.now_ist().strftime("%d %b %Y, %H:%M IST"), message="Live run in progress.")
-        if len(quotes) < len(universe):
-            self._warn(f"FYERS returned quotes for {len(quotes)} of {len(universe)} symbols; check the rest in universe.json.")
+        missing = [e["symbol"] for e in entries if e["fyers"] not in quotes]
+        if missing:
+            self._warn(f"FYERS returned no quote for {len(missing)} of {len(entries)} stocks in \"{name}\": "
+                       f"{', '.join(missing[:12])}{'…' if len(missing) > 12 else ''}. They are skipped, not substituted.")
         if not short:
-            raise RunAbort("No stocks passed the Scout screen (no valid quotes).")
+            raise RunAbort("No stocks in this watchlist passed the Scout screen (no valid quotes).")
         session = ev.market_session()
         tech = self._technicals(provider, short, quotes, session)
         fund = self._fundamentals(short, quotes)
@@ -252,7 +277,7 @@ class Pipeline:
         bundles = [self._bundle(e, quotes[e["fyers"]], tech[e["symbol"]], fund[e["symbol"]], nws[e["symbol"]],
                                 self._yf_map[e["symbol"]], retrieved, session) for e in short]
         self._warn_market(session, bundles)
-        return bundles, len(universe)
+        return bundles, len(entries)
 
     # ---------- focused (search & select) ----------
     def _collect_focused(self, target):
@@ -407,8 +432,8 @@ class Pipeline:
         buys = [r for r in rows if r["verdict"] == "BUY"]
         top = max(rows, key=lambda r: (r["verdict"] == "BUY", r["confidence"], r["bull"] - r["bear"])) if rows else None
         focused = self.state["scope"] == "focused"
-        text = (f"Focused analysis of {bundles[0]['symbol']} (selected, not from universe.json)" if focused
-                else f"Built from {len(bundles)} real NSE stocks")
+        text = (f"Focused analysis of {bundles[0]['symbol']} (selected, not from a watchlist)" if focused
+                else f"Built from {len(bundles)} real NSE stocks in \"{(self.state.get('watchlist') or {}).get('name', 'watchlist')}\"")
         self._set(kpis={"universe": uni_n, "in_debate": len(rows), "buys": len(buys),
                         "top_pick": {"symbol": top["symbol"], "confidence": top["confidence"], "verdict": top["verdict"]} if top else None},
                   footer={"text": text, "pulled_at": self.state["pulled_at"], "synthetic": False})
