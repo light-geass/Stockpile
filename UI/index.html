@@ -1,0 +1,259 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="description" content="Institutional-grade Indian stock analysis dashboard powered by a multi-agent debate architecture.">
+  <meta name="csrf" content="__CSRF__">
+  <meta name="color-scheme" content="dark light">
+  <title>__BRAND__ · Indian stock analysis</title>
+
+  <!-- Tailwind CSS v4 Browser Engine & Lucide Icons -->
+  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4" defer></script>
+  <script src="https://cdn.jsdelivr.net/npm/lucide@0.469.0/dist/umd/lucide.min.js" defer></script>
+
+  <!-- Modern Glassmorphic Stylesheet -->
+  <link rel="stylesheet" href="./styles.css">
+
+  <!-- Production ES6+ Application Logic -->
+  <script type="module" src="./app.js"></script>
+</head>
+
+<body>
+  <!-- Accessible Skip Navigation -->
+  <a href="#main-content" class="skip-link">Skip to main content</a>
+
+  <!-- Ambient Glow Backdrop Elements -->
+  <div class="ambient-glow ambient-glow-top" aria-hidden="true"></div>
+  <div class="ambient-glow ambient-glow-bottom" aria-hidden="true"></div>
+
+  <!-- Primary Application Wrapper -->
+  <div class="app-shell">
+
+    <!-- Global Application Header -->
+    <header class="header-bar" role="banner">
+      <div class="brand-group">
+        <h1 class="brand-title">
+          <span class="logo-mark" aria-hidden="true">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <polygon points="12 2 22 8.5 22 15.5 12 22 2 15.5 2 8.5 12 2"></polygon>
+              <line x1="12" y1="22" x2="12" y2="15.5"></line>
+              <polyline points="22 8.5 12 15.5 2 8.5"></polyline>
+              <polyline points="2 15.5 12 8.5 22 15.5"></polyline>
+              <line x1="12" y1="2" x2="12" y2="8.5"></line>
+            </svg>
+          </span>
+          <span class="brand-name">__BRAND__</span>
+        </h1>
+        <p class="brand-subtitle" id="sub">Indian stock analysis · 9 agents on duty</p>
+      </div>
+
+      <div class="header-controls">
+        <!-- Theme Toggle -->
+        <button class="btn btn-icon theme-toggle-btn" id="themeToggle" type="button" aria-label="Toggle color theme" title="Toggle dark / light theme">
+          <i data-lucide="sun" class="icon-sun" aria-hidden="true"></i>
+          <i data-lucide="moon" class="icon-moon" aria-hidden="true"></i>
+        </button>
+
+        <!-- FYERS Broker Status Pill -->
+        <div class="status-pill" id="fyPill" role="status" aria-live="polite">
+          <span class="status-dot offline" id="fyDot" aria-hidden="true"></span>
+          <span class="status-label" id="fyLabel">FYERS</span>
+          <button class="btn btn-ghost btn-sm" id="fyBtn" type="button">Connect FYERS</button>
+        </div>
+
+        <!-- Quick Execution Bar -->
+        <div class="runbar" role="group" aria-label="Watchlist Run Controls">
+          <div class="select-wrapper">
+            <select id="runWl" aria-label="Select watchlist to analyze" disabled>
+              <option>No watchlists</option>
+            </select>
+          </div>
+          <button class="btn btn-primary" id="go" type="button">
+            <i data-lucide="play" class="btn-icon-svg" aria-hidden="true"></i>
+            <span>Run analysis</span>
+          </button>
+        </div>
+      </div>
+    </header>
+
+    <!-- Global Search & Command Bar -->
+    <section class="search-command-bar" aria-label="Instrument Search and Targeted Actions">
+      <div class="search-box">
+        <div class="search-field">
+          <span class="search-icon" aria-hidden="true">
+            <i data-lucide="search"></i>
+          </span>
+          <input id="q" type="search" role="combobox" aria-label="Search a stock, ETF, or listed IPO"
+            aria-autocomplete="list" aria-controls="res" aria-expanded="false" autocomplete="off" spellcheck="false"
+            placeholder="Search a stock / ETF / listed IPO (e.g. TCS, NIFTYBEES, ZOMATO)…">
+        </div>
+        <ul class="dropdown-list" id="res" role="listbox" aria-label="Search suggestions" hidden></ul>
+      </div>
+
+      <div class="selection-pill" id="sel" hidden></div>
+      <button class="btn btn-ghost" id="wlAdd" type="button" hidden>+ Watchlist</button>
+      <button class="btn btn-primary" id="goSel" type="button" disabled>Analyze selected</button>
+    </section>
+
+    <!-- Dynamic Notification / Status Banners -->
+    <section id="notices" class="notices-container" aria-live="polite" aria-atomic="true"></section>
+
+    <!-- Workspace Segmented Navigation -->
+    <nav class="workspace-tabs" role="tablist" aria-label="Workspace Views">
+      <button class="workspace-tab" id="analysisTab" role="tab" aria-selected="true"
+        aria-controls="analysisView" tabindex="0">
+        <i data-lucide="activity" class="tab-icon" aria-hidden="true"></i>
+        <span>Analysis</span>
+      </button>
+      <button class="workspace-tab" id="watchlistTab" role="tab" aria-selected="false"
+        aria-controls="watchlistView" tabindex="-1">
+        <i data-lucide="bookmark" class="tab-icon" aria-hidden="true"></i>
+        <span>Watchlist</span>
+      </button>
+      <button class="workspace-tab" id="accuracyTab" role="tab" aria-selected="false"
+        aria-controls="accuracyView" tabindex="-1">
+        <i data-lucide="shield-check" class="tab-icon" aria-hidden="true"></i>
+        <span>Accuracy</span>
+      </button>
+    </nav>
+
+    <!-- Primary Content Landmark -->
+    <main id="main-content" class="workspace-main">
+
+      <!-- View Panel: Analysis -->
+      <section id="analysisView" class="tab-panel active" role="tabpanel" aria-labelledby="analysisTab">
+        <!-- KPIs Overview Grid -->
+        <section class="kpis-grid" aria-label="Summary KPIs">
+          <article class="card kpi-card">
+            <span class="kpi-label">Watchlist</span>
+            <strong class="kpi-value" id="k1">–</strong>
+            <span class="kpi-caption">stocks scanned</span>
+          </article>
+          <article class="card kpi-card">
+            <span class="kpi-label">In debate</span>
+            <strong class="kpi-value" id="k2">–</strong>
+            <span class="kpi-caption">shortlisted by Scout</span>
+          </article>
+          <article class="card kpi-card">
+            <span class="kpi-label">Buy signals</span>
+            <strong class="kpi-value" id="k3">–</strong>
+            <span class="kpi-caption">verdict = BUY</span>
+          </article>
+          <article class="card kpi-card">
+            <span class="kpi-label">Top pick</span>
+            <strong class="kpi-value" id="k4">–</strong>
+            <span class="kpi-caption" id="k4s">conviction score</span>
+          </article>
+        </section>
+
+        <!-- Multi-Agent Pipeline -->
+        <div class="section-header">
+          <h2 class="section-title">
+            <i data-lucide="cpu" class="section-title-icon" aria-hidden="true"></i>
+            <span>Agent Pipeline</span>
+          </h2>
+          <span class="section-badge">Autonomous Debate</span>
+        </div>
+        <section class="agents-grid" id="agents" aria-label="Debate Agent Statuses"></section>
+
+        <!-- Near-Close Overnight Playbook -->
+        <section id="playbook" class="playbook-section" aria-label="Overnight Playbook"></section>
+
+        <!-- Consensus Verdicts Feed -->
+        <div class="section-header">
+          <h2 class="section-title">
+            <i data-lucide="bar-chart-3" class="section-title-icon" aria-hidden="true"></i>
+            <span>Consensus Verdicts</span>
+          </h2>
+          <span class="section-badge">Ranked by Conviction</span>
+        </div>
+        <section class="verdicts-feed" id="feed" aria-label="Debate Verdicts and Deep Research">
+          <div class="card empty-state">
+            <i data-lucide="inbox" class="empty-state-icon" aria-hidden="true"></i>
+            <p>No run yet. Press <strong>Run analysis</strong> to scan the selected watchlist.</p>
+          </div>
+        </section>
+      </section>
+
+      <!-- View Panel: Watchlist -->
+      <section id="watchlistView" class="tab-panel" role="tabpanel" aria-labelledby="watchlistTab" hidden>
+        <div class="toolbar-card card">
+          <div class="toolbar-left">
+            <label for="wlSelect" class="toolbar-label">Active Watchlist:</label>
+            <div class="select-wrapper">
+              <select id="wlSelect" aria-label="Select watchlist to view"></select>
+            </div>
+          </div>
+          <div class="toolbar-actions">
+            <button class="btn btn-ghost" id="wlNew" type="button">
+              <i data-lucide="plus" aria-hidden="true"></i>
+              <span>New list</span>
+            </button>
+            <button class="btn btn-ghost" id="wlRename" type="button" disabled>
+              <i data-lucide="edit-3" aria-hidden="true"></i>
+              <span>Rename</span>
+            </button>
+            <button class="btn btn-danger-ghost" id="wlDel" type="button" title="Delete the selected watchlist" disabled>
+              <i data-lucide="trash-2" aria-hidden="true"></i>
+              <span>Delete</span>
+            </button>
+          </div>
+        </div>
+
+        <article class="card watchlist-meta-card">
+          <div class="meta-content">
+            <h2 class="meta-title" id="wlViewName">Watchlist</h2>
+            <p class="meta-desc" id="wlViewMeta">Choose a watchlist to view its stocks.</p>
+          </div>
+        </article>
+
+        <section class="watchlist-grid" id="wlViewItems" aria-label="Watchlist instruments"></section>
+      </section>
+
+      <!-- View Panel: Accuracy -->
+      <section id="accuracyView" class="tab-panel" role="tabpanel" aria-labelledby="accuracyTab" hidden>
+        <div class="toolbar-card card">
+          <div class="toolbar-left">
+            <span class="toolbar-caption">
+              Settled verdicts: measured hit rate and return range (actual history, never a future guarantee).
+            </span>
+          </div>
+          <div class="toolbar-actions">
+            <button class="btn btn-ghost" id="settleBtn" type="button">
+              <i data-lucide="check-circle" aria-hidden="true"></i>
+              <span>Settle now</span>
+            </button>
+            <button class="btn btn-ghost" id="retrainBtn" type="button">
+              <i data-lucide="refresh-cw" aria-hidden="true"></i>
+              <span>Retrain model</span>
+            </button>
+            <button class="btn btn-ghost" id="accReload" type="button">
+              <i data-lucide="rotate-ccw" aria-hidden="true"></i>
+              <span>Refresh</span>
+            </button>
+          </div>
+        </div>
+
+        <section id="accBody" class="accuracy-body" aria-label="Historical accuracy metrics and replay accelerator">
+          <div class="card empty-state">
+            <i data-lucide="loader" class="empty-state-icon animate-spin" aria-hidden="true"></i>
+            <p>Loading accuracy history…</p>
+          </div>
+        </section>
+      </section>
+
+    </main>
+
+    <!-- Global Application Footer -->
+    <footer class="footer-bar" id="foot" role="contentinfo">
+      <span class="footer-highlight">Analysis only. No trades are ever placed.</span>
+      <span class="footer-secondary">Conviction (x/10) is an internal score, not a probability of profit. Not investment advice.</span>
+    </footer>
+
+  </div>
+</body>
+
+</html>
+

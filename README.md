@@ -124,6 +124,6 @@ in FYERS settings and `.env` (scheme, host, path, no trailing slash differences)
 * Lists are shared by everyone who can unlock the dashboard; there is no per-user account model.
 
 ## 7. Layout
-`app.py` routes+security · `fyers_auth.py` OAuth/token store · `fyers_client.py` read-only data client · `instrument_search.py` NSE symbol-master catalogue/search · `data_sources.py` watchlist entries/yfinance · `evidence.py` indicators+bundle · `news.py` · `grounding.py` evidence IDs/number checks · `scoring.py` deterministic engine · `llm.py` Groq panel+alert rules · `pipeline.py` orchestration · `notifier.py` Telegram · `storage.py` SQLite audit · `watchlists.py` Supabase watchlist store · `dashboard.html` UI.
+`app.py` routes+security · `fyers_auth.py` OAuth/token store · `fyers_client.py` read-only data client · `instrument_search.py` NSE symbol-master catalogue/search · `data_sources.py` watchlist entries/yfinance · `evidence.py` indicators+bundle · `news.py` · `grounding.py` evidence IDs/number checks · `scoring.py` deterministic engine · `llm.py` Groq panel+alert rules · `pipeline.py` orchestration · `notifier.py` Telegram · `storage.py` SQLite audit · `watchlists.py` Supabase watchlist store · `UI/` (modular dashboard).
 
 *Not investment advice. Educational software; no warranty.*

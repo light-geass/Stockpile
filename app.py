@@ -1,4 +1,4 @@
-﻿"""Flask entrypoint. Binds 127.0.0.1 only; debug OFF. Reach it from outside only through your own HTTPS tunnel (ngrok).
+"""Flask entrypoint. Binds 127.0.0.1 only; debug OFF. Reach it from outside only through your own HTTPS tunnel (ngrok).
 Security model:
   * Host header allow-list (loopback + the host in FYERS_REDIRECT_URI). Forwarded headers are NEVER trusted for host/scheme.
   * A request is "tunnel/public" if its Host is the tunnel host OR it carries X-Forwarded-* headers (ngrok adds them).
@@ -32,7 +32,7 @@ from watchlists import WatchlistError, WatchlistStore
 
 log = logging.getLogger("app")
 BASE = Path(__file__).resolve().parent
-PUBLIC_ENDPOINTS = {"healthz", "fyers_callback", "unlock"}
+PUBLIC_ENDPOINTS = {"healthz", "fyers_callback", "unlock", "styles", "javascript"}
 FWD_HEADERS = ("X-Forwarded-For", "X-Forwarded-Host", "X-Forwarded-Proto", "Forwarded")
 # ?auth=<kind> on return from the OAuth callback, rendered by the dashboard through /api/auth-notice/<kind>.
 AUTH_NOTICES = {
@@ -126,7 +126,7 @@ def create_app(settings=None, deps=None, store_path=None):
         resp.headers["X-Frame-Options"] = "DENY"
         resp.headers["Referrer-Policy"] = "no-referrer"
         resp.headers["Content-Security-Policy"] = (
-            f"default-src 'none'; script-src 'self' 'nonce-{nonce}'; style-src 'unsafe-inline'; "
+            f"default-src 'none'; script-src 'self' 'nonce-{nonce}' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; "
             "connect-src 'self'; img-src 'self' data:; base-uri 'none'; form-action 'self'; frame-ancestors 'none'")
         if request.host.lower() == s.tunnel_host and s.fyers_redirect_uri.startswith("https://"):
             resp.headers["Strict-Transport-Security"] = "max-age=31536000"
@@ -142,9 +142,19 @@ def create_app(settings=None, deps=None, store_path=None):
         request._nonce = secrets.token_urlsafe(16)
         session.permanent = True
         session.setdefault("csrf", secrets.token_urlsafe(32))
-        html = (BASE / "dashboard.html").read_text(encoding="utf-8")
+        html = (BASE / "UI" / "index.html").read_text(encoding="utf-8")
         html = html.replace("__NONCE__", request._nonce).replace("__CSRF__", session["csrf"]).replace("__BRAND__", str(escape(s.brand)))
         return Response(html, mimetype="text/html")
+
+    @app.get("/styles.css")
+    def styles():
+        css = (BASE / "UI" / "styles.css").read_text(encoding="utf-8")
+        return Response(css, mimetype="text/css")
+
+    @app.get("/app.js")
+    def javascript():
+        js = (BASE / "UI" / "app.js").read_text(encoding="utf-8")
+        return Response(js, mimetype="application/javascript")
 
     @app.route("/unlock", methods=["GET", "POST"])
     def unlock():
