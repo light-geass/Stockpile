@@ -32,6 +32,7 @@ const state = {
   pollTimer: null,
   lastAccuracyData: null,
   replay: { busy: false, result: null, symbol: 'NSE:NIFTYBEES-EQ' },
+  replaySearch: { items: [], activeIndex: -1, querySeq: 0, timer: null },
   theme: getInitialTheme()
 };
 
@@ -473,6 +474,120 @@ async function executeSearch() {
 }
 
 // ============================================================================
+// Replay symbol autocomplete
+// ============================================================================
+
+function closeReplayDropdown() {
+  state.replaySearch.activeIndex = -1;
+  const res = document.getElementById('replayRes'), q = document.getElementById('replaySym');
+  if (res) { res.hidden = true; }
+  if (q) { q.setAttribute('aria-expanded', 'false'); q.removeAttribute('aria-activedescendant'); }
+}
+
+function paintReplaySearch(note) {
+  const res = document.getElementById('replayRes'), q = document.getElementById('replaySym');
+  if (!res || !q) return;
+  if (note) {
+    res.replaceChildren(h('li', { class: 'note', role: 'presentation' }, note));
+  } else {
+    res.replaceChildren(...state.replaySearch.items.map((item, i) => h('li', {
+      id: `ropt-${i}`, role: 'option', 'data-action': 'pick-replay', 'data-index': i, 'aria-selected': String(i === state.replaySearch.activeIndex)
+    },
+      h('div', { class: 'sym-block' }, h('b', {}, item.symbol), h('small', {}, item.name)),
+      h('small', { class: 'chip' }, `${item.exchange || ''} ${item.asset_type || ''}`.trim())
+    )));
+    if (state.replaySearch.activeIndex >= 0) q.setAttribute('aria-activedescendant', `ropt-${state.replaySearch.activeIndex}`);
+  }
+  res.hidden = false;
+  q.setAttribute('aria-expanded', 'true');
+}
+
+async function executeReplaySearch() {
+  const q = document.getElementById('replaySym');
+  const query = q?.value.trim() || '';
+  const seq = ++state.replaySearch.querySeq;
+  if (query.length < 2) { closeReplayDropdown(); return; }
+
+  paintReplaySearch('Searching…');
+  try {
+    const res = await api(`/api/instruments/search?q=${encodeURIComponent(query)}`);
+    if (seq !== state.replaySearch.querySeq) return;
+    if (res.status === 503) { paintReplaySearch('Symbol catalog warming up…'); return; }
+    if (res.status === 429) { paintReplaySearch('Rate limited. Please wait.'); return; }
+    if (!res.ok) { paintReplaySearch('Search failed.'); return; }
+
+    const d = await res.json();
+    if (seq !== state.replaySearch.querySeq) return;
+    state.replaySearch.items = d.results || [];
+    state.replaySearch.activeIndex = -1;
+    if (!state.replaySearch.items.length) { paintReplaySearch('No matching instruments.'); return; }
+    paintReplaySearch();
+  } catch (_) { if (seq === state.replaySearch.querySeq) paintReplaySearch('Network error.'); }
+}
+
+function pickReplayInstrument(item) {
+  if (!item) return;
+  const q = document.getElementById('replaySym');
+  if (q) {
+    q.value = item.provider_symbol || item.symbol || '';
+    q.dataset.selected = '1';
+  }
+  closeReplayDropdown();
+}
+
+function wireReplayEvents() {
+  const rq = document.getElementById('replaySym');
+  if (!rq) return;
+  rq.addEventListener('input', () => {
+    delete rq.dataset.selected;
+    clearTimeout(state.replaySearch.timer);
+    state.replaySearch.timer = setTimeout(executeReplaySearch, 200);
+  });
+
+  rq.addEventListener('keydown', e => {
+    if (e.key === 'Escape') { closeReplayDropdown(); return; }
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      if (!state.replaySearch.items.length) return;
+      e.preventDefault();
+      const d = e.key === 'ArrowDown' ? 1 : -1;
+      state.replaySearch.activeIndex = (state.replaySearch.activeIndex + d + state.replaySearch.items.length) % state.replaySearch.items.length;
+      paintReplaySearch();
+      return;
+    }
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      if (state.replaySearch.activeIndex >= 0 && state.replaySearch.items[state.replaySearch.activeIndex]) {
+        pickReplayInstrument(state.replaySearch.items[state.replaySearch.activeIndex]);
+      } else if (state.replaySearch.items.length === 1) {
+        pickReplayInstrument(state.replaySearch.items[0]);
+      } else {
+        runReplay(); // manual FYERS symbol entry
+      }
+    }
+  });
+
+  rq.addEventListener('blur', () => {
+    setTimeout(() => {
+      if (!document.activeElement?.closest('#replayWrap')) {
+        closeReplayDropdown();
+      }
+    }, 250);
+  });
+
+  const rres = document.getElementById('replayRes');
+  if (rres) {
+    rres.addEventListener('mousedown', e => { e.preventDefault(); });
+    rres.addEventListener('pointerdown', e => {
+      const pick = e.target.closest('[data-action="pick-replay"]');
+      if (pick) {
+        const i = parseInt(pick.dataset.index, 10);
+        if (state.replaySearch.items[i]) pickReplayInstrument(state.replaySearch.items[i]);
+      }
+    });
+  }
+}
+
+// ============================================================================
 // Accuracy & Replay Backtest
 // ============================================================================
 
@@ -511,8 +626,13 @@ function renderAccuracy(d) {
     h('h3', { style: 'font-size:15px;font-weight:700;margin-bottom:4px' }, 'Replay Accelerator'),
     h('p', { class: 'tag', style: 'margin-bottom:4px' }, "Backtest deterministic engine over one instrument's last year of candles."),
     h('p', { class: 'tag warnt', style: 'margin-bottom:10px' }, rep?.limitation || "Point-in-time gaps apply."),
+    h('div', { class: 'search-box', id: 'replayWrap', style: 'flex:1 1 260px;margin-bottom:8px' },
+      h('div', { class: 'search-field' },
+        h('input', { id: 'replaySym', type: 'text', role: 'combobox', 'aria-autocomplete': 'list', 'aria-controls': 'replayRes', 'aria-expanded': 'false', autocomplete: 'off', spellcheck: 'false', placeholder: 'Search stock / ETF (e.g. TCS, NIFTYBEES) or type NSE:SYM-EQ', value: state.replay.symbol, style: 'flex:1;padding:8px 12px;border:1px solid var(--border);border-radius:var(--radius-md);background:var(--surface);color:var(--text-primary);font:inherit;' })
+      ),
+      h('ul', { class: 'dropdown-list', id: 'replayRes', role: 'listbox', 'aria-label': 'Replay symbol suggestions', hidden: true })
+    ),
     h('div', { style: 'display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:8px' },
-      h('input', { id: 'replaySym', type: 'text', value: state.replay.symbol, style: 'flex:1 1 220px;padding:8px 12px;border:1px solid var(--border);border-radius:var(--radius-md);background:var(--surface);color:var(--text-primary);font:inherit;' }),
       h('button', { class: 'btn btn-ghost', type: 'button', 'data-action': 'run-replay', disabled: state.replay.busy }, state.replay.busy ? 'Replaying…' : 'Run replay')
     ),
     repTable
@@ -531,6 +651,7 @@ function renderAccuracy(d) {
 
   document.getElementById('accBody')?.replaceChildren(...cards);
   refreshIcons();
+  wireReplayEvents();
 }
 
 async function loadAccuracy() {
@@ -545,7 +666,8 @@ async function loadAccuracy() {
 
 async function runReplay() {
   const sym = document.getElementById('replaySym')?.value.trim();
-  if (!sym) { showNotice('warn', 'Enter a FYERS symbol (e.g. NSE:TCS-EQ).', 3000); return; }
+  if (!sym) { showNotice('warn', 'Search and pick an instrument, or type a FYERS symbol (e.g. NSE:TCS-EQ).', 3000); return; }
+  closeReplayDropdown();
   state.replay.symbol = sym; state.replay.busy = true;
   if (state.lastAccuracyData) renderAccuracy(state.lastAccuracyData);
 
@@ -642,6 +764,21 @@ function setupEvents() {
       return;
     }
 
+    // Pick replay suggestion
+    const pickReplay = target.closest('[data-action="pick-replay"]');
+    if (pickReplay) {
+      const i = parseInt(pickReplay.dataset.index, 10);
+      if (state.replaySearch.items[i]) {
+        pickReplayInstrument(state.replaySearch.items[i]);
+      }
+      return;
+    }
+
+    // Close replay dropdown on click outside
+    if (!target.closest('#replayWrap') && !target.closest('#replayRes')) {
+      closeReplayDropdown();
+    }
+
     // Pick search suggestion
     const pickSearch = target.closest('[data-action="pick-search"]');
     if (pickSearch) {
@@ -668,7 +805,7 @@ function setupEvents() {
     }
 
     // Close search dropdown on click outside
-    if (!target.closest('.search-box')) {
+    if (!target.closest('.search-box') || target.closest('#replayWrap')) {
       closeSearchDropdown();
     }
 
@@ -874,6 +1011,9 @@ function setupEvents() {
       }, 250);
     });
   }
+
+  // Replay symbol autocomplete events (input is re-created on each render)
+  wireReplayEvents();
 }
 
 // ============================================================================

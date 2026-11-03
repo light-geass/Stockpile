@@ -164,4 +164,102 @@ stock-agents/
 └── README.md               # Architecture & quickstart guide
 ```
 
+## 8. Accuracy & Performance Metrics Guide (How to Use When Researching a Stock)
+
+The **Accuracy** tab is a built-in verification scorecard and self-learning system. Whenever the agents issue a verdict (`BUY`, `HOLD`, or `AVOID`), it is logged in SQLite (`data/audit.sqlite3`). As time passes, the system settles those verdicts against actual market closing candles to measure historical hit rates and returns.
+
+### The Metrics Explained
+
+| Column | Metric | Definition | How to Use in Decision Making |
+| :--- | :--- | :--- | :--- |
+| **`H`** | Horizon | Holding period in trading days (`1d`, `5d`, `20d`, `60d`). | Match with your strategy (e.g. `5d` for short swings, `20d` for momentum trends). |
+| **`N`** | Sample Size | Number of settled historical verdicts evaluated. | Higher $N$ ($> 30$) gives higher statistical confidence. |
+| **`HIT RATE`** | Win Rate | % of verdicts that closed with a positive gain ($> 0\%$). | Look for time horizons where hit rate exceeds $55\text{--}60\%$. |
+| **`MEDIAN`** | Typical Return | The middle percentage return across all trades. | **Primary Profit Target**: Set your first scale-out/take-profit target here. |
+| **`MEAN`** | Average Return | Arithmetic average of all percentage returns. | Compares against the benchmark (NIFTYBEES) to confirm strategy alpha. |
+| **`P10`** | Worst 10% Tail | 10th percentile outcome (worst-case risk). | **Risk Budgeting**: Ensure a P10 loss on this trade never risks $>1\text{--}2\%$ of your total portfolio. |
+| **`P90`** | Best 10% Upside | 90th percentile outcome (strongest runner). | **Extended Profit Target**: If price reaches P90, trail stops tightly—you are in the top 10% outcome. |
+| **`MEDIAN MAE`** | Max Adverse Excursion | Median deepest intraday dip experienced *during* the trade. | **Stop-Loss Placement**: Place stops *below* the MAE so normal price noise doesn't shake you out prematurely. |
+
+---
+
+### Practical Guide: How to Use Performance Metrics When Researching a Stock
+
+#### 1. Identify Your Holding Horizon (When to Exit)
+Look across the **`1d`**, **`5d`**, **`20d`**, and **`60d`** rows:
+
+| If you see... | What it means | How to use it |
+| :--- | :--- | :--- |
+| **`1d` Hit Rate is ~50%, but `20d` Hit Rate is 65%+** | The agents' signals are swing/trend signals, not day-trade scalps. | **Do not panic-sell on Day 1 or Day 2.** Give the trade 3–4 weeks (`20d`) to let institutional momentum develop. |
+| **`60d` returns flatten or dip compared to `20d`** | Momentum peaks around 1 month and then cools off. | **Plan to exit around 3–4 weeks.** Avoid holding indefinitely without trailing stops. |
+
+#### 2. Set Realistic Profit Targets using `MEDIAN` & `P90`
+Don't guess where to take profits — use historical distributions:
+* **Target 1 (Baseline Target = `MEDIAN`):**
+  * *Example:* If the `20d` Median Return is **`+4.8%`**, that is your primary target. When the stock reaches ~+4% to +5%, consider booking 50% profit or moving your stop loss to breakeven.
+* **Target 2 (Runner / Best-Case = `P90`):**
+  * The **90th percentile** is the top 10% outlier gain (e.g., **`+12.5%`**). If the stock surges toward P90, don't get greedy — you are already in the top 10% best-case outcome. Trail your stop closely.
+
+#### 3. Place Your Stop-Loss Safely using `MEDIAN MAE`
+**MAE (Maximum Adverse Excursion)** is the single most valuable metric for risk management:
+> It measures the **deepest pullback a stock suffers during the holding period before closing**.
+
+* **The Problem:** Many traders place stops too tight (e.g., -1.5%) and get shaken out right before the stock rallies.
+* **How to use `MEDIAN MAE`:**
+  * *Example:* If `20d` Median MAE is **`-3.2%`**, you know that normal price fluctuation dips about -3% on typical trades.
+  * **Rule:** Place your stop loss **below the MAE** (e.g., at -4.0% or below key chart support). This ensures you won't get stopped out by ordinary market noise.
+
+#### 4. Calculate Your Reward-to-Risk Ratio
+Before placing an order, compare your expected gain against your downside risk:
+
+$$\text{Reward-to-Risk Ratio} = \frac{\text{MEDIAN (Expected Return)}}{\text{MEDIAN MAE (Typical Drawdown)}}$$
+
+* **If `MEDIAN` = `+5.0%` and `MEDIAN MAE` = `-2.5%`:**
+  * You have a **2 : 1 reward-to-risk ratio** with a >60% hit rate — **favorable setup**.
+* **If `MEDIAN` = `+2.0%` and `MEDIAN MAE` = `-4.5%`:**
+  * Downside risk outweighs expected upside — **skip the trade or wait for a pullback**.
+
+#### 5. Check Worst-Case Risk with `P10`
+* **`P10`** represents the worst 10% tail outcomes (e.g., **`-7.5%`**).
+* **Position Sizing Rule:** Never buy so many shares that a `P10` loss would severely damage your portfolio. If a -7.5% drop on that position would risk more than 1–2% of your total capital, reduce your position size.
+
+---
+
+### Step-by-Step Practical Trading Workflow
+
+```mermaid
+flowchart TD
+    A["1. Check Verdict & Conviction\n(e.g., BUY, 7/10)"] --> B["2. Check Horizon Table\n(Which timeframe has highest Hit Rate?)"]
+    B --> C["3. Set Stop-Loss\n(Just beyond MEDIAN MAE)"]
+    C --> D["4. Set Profit Target\n(At MEDIAN return)"]
+    D --> E["5. Verify Risk/Reward\n(Reward >= 2x MAE Risk)"]
+    E --> F["Execute Trade with Proper Position Size"]
+```
+
+
+```
+1. Run Analysis / Search Stock (e.g. TCS)
+   └─> Check Verdict (BUY) & Conviction (e.g. 7/10)
+
+2. Consult the Accuracy / Replay Table
+   ├─> Check Horizons: Find the timeframe with the highest Hit Rate (e.g. 20d @ 65%)
+   ├─> Set Stop-Loss: Place stop beyond MEDIAN MAE (e.g. if MAE is -3.2%, stop at -4.0% or support)
+   ├─> Set Take-Profit: Target 1 at MEDIAN (+5.0%), Target 2 at P90 (+12.0%)
+   └─> Verify Reward-to-Risk: Confirm MEDIAN / MAE >= 2.0
+
+3. Size Position
+   └─> Ensure a worst-case P10 loss fits within your 1% portfolio risk rule
+```
+
+---
+
+### Section Controls & Actions
+
+* **`Settle now`**: Pulls updated exchange candles and resolves pending historical verdicts whose holding horizons ($1\text{d}, 5\text{d}, 20\text{d}, 60\text{d}$) have completed.
+* **`Retrain model`**: Feeds settled real-world trade outcomes into `agents/predict.py` to recalibrate probability weights and Brier scores, allowing the agents to learn from past mistakes.
+* **`Refresh`**: Reloads the latest metrics from the local audit store without re-running candle settlement.
+* **`Replay Accelerator`**: Runs a deterministic 1-year backtest over the last 365 days of candles for any entered symbol (e.g. `NSE:TCS-EQ`, `NSE:NIFTYBEES-EQ`), instantly displaying that instrument's exact historical metrics.
+
+---
+
 *Not investment advice. Educational software; no warranty.*
