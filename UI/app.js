@@ -518,7 +518,7 @@ function renderAccuracy(d) {
     repTable
   );
 
-  document.getElementById('accBody')?.replaceChildren(
+  const cards = [
     h('article', { class: 'card', style: 'padding:18px 22px;margin-bottom:14px' },
       h('p', { style: 'font-weight:600;margin-bottom:4px' }, d.disclaimer),
       h('p', { class: 'tag' }, `Settled rows: ${d.n_settled} · Benchmark: ${d.benchmark_symbol} (${d.benchmark_source || 'unrecorded'}) · ${d.survivorship}`)
@@ -527,7 +527,9 @@ function renderAccuracy(d) {
     ...Object.entries(slices).map(([k, rows]) => h('article', { class: 'card', style: 'padding:18px 22px;margin-bottom:14px' }, accTable(k, rows, 'h'))),
     d.rolling?.length ? h('article', { class: 'card', style: 'padding:18px 22px;margin-bottom:14px' }, accTable('Rolling monthly cohorts', d.rolling, 'month')) : null,
     repCard
-  );
+  ].filter(Boolean);
+
+  document.getElementById('accBody')?.replaceChildren(...cards);
   refreshIcons();
 }
 
