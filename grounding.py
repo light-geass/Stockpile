@@ -32,12 +32,25 @@ def _get(b, path):
 
 
 def build_facts(bundle):
-    """Returns (facts, news_items, index). facts: [{id,path,label,value,unit}], news ids N1.. (suspicious excluded)."""
+    """Returns (facts, news_items, index). facts: [{id,path,label,value,unit}], news ids N1.. (suspicious excluded).
+    Chart patterns from the deterministic Chart Analyst stage become citable facts: the model may discuss
+    them but can never invent detections, levels or confidence."""
     facts = []
     for path, label, unit in FACT_SPEC:
         v = _get(bundle, path)
         if v is not None:
             facts.append({"id": f"E{len(facts) + 1}", "path": path, "label": label, "value": v, "unit": unit})
+    chart = bundle.get("chart") or {}
+    if chart.get("available"):
+        facts.append({"id": f"E{len(facts) + 1}", "path": "chart.status", "label": "Chart pattern status",
+                      "value": chart["status"], "unit": ""})
+        for p in chart.get("patterns", []):
+            name = p["name"].replace("_", " ")
+            facts.append({"id": f"E{len(facts) + 1}", "path": f"chart.pattern.{p['name']}",
+                          "label": f"Chart pattern: {name}", "value": f"{p['status']} {p['direction']}", "unit": ""})
+            for lv in p.get("levels", [])[:2]:
+                facts.append({"id": f"E{len(facts) + 1}", "path": f"chart.level.{p['name']}",
+                              "label": f"Chart {name} level", "value": round(float(lv), 2), "unit": "INR"})
     news = []
     for it in (bundle.get("news") or {}).get("recent", []):
         if it.get("suspicious"):

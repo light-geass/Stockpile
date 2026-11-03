@@ -39,6 +39,13 @@ header{display:flex;flex-wrap:wrap;gap:16px;align-items:center;justify-content:s
 .btn{border:0;background:var(--accent);color:var(--accent-ink);padding:10px 20px;border-radius:999px;font:inherit;font-weight:600;cursor:pointer;transition:transform .12s,opacity .12s}
 .btn:hover:not(:disabled){transform:translateY(-1px)} .btn:disabled{opacity:.45;background:var(--soft);color:var(--muted);cursor:not-allowed;transform:none}
 .btn.ghost{background:var(--card);color:var(--ink);border:1px solid var(--line);font-weight:550;padding:8px 14px;font-size:14px}
+.runbar{display:flex;align-items:stretch;border-radius:999px;overflow:hidden}
+.run-sel{position:relative;display:flex;align-items:center}
+.run-sel select{appearance:none;border:0;background:var(--accent);color:var(--accent-ink);font:inherit;font-weight:600;padding:10px 28px 10px 18px;cursor:pointer;max-width:240px}
+.run-sel::after{content:'▾';position:absolute;right:10px;color:var(--accent-ink);pointer-events:none;font-size:12px}
+.run-sel select:disabled{opacity:.45;cursor:not-allowed}
+.runbar .btn{border-radius:0;border-left:1px solid color-mix(in srgb,var(--accent-ink) 30%,transparent)}
+.runbar .btn:hover{transform:none}
 .pill{display:inline-flex;align-items:center;gap:8px;background:var(--card);border:1px solid var(--line);border-radius:999px;padding:6px 8px 6px 12px;font-size:13px;color:var(--muted)}
 .dot{width:9px;height:9px;border-radius:50%;background:#b8b3a6;flex:none}
 .dot.connected,.dot.done{background:var(--buy)} .dot.expired,.dot.error,.dot.unavailable{background:var(--avoid)}
@@ -87,43 +94,6 @@ footer{margin-top:36px;color:var(--muted);font-size:13px;display:flex;flex-direc
 footer .foot-main{font-weight:550;color:var(--ink)}
 @media (max-width:900px){.kpis,.agents{grid-template-columns:repeat(2,1fr)}.row>button.head{grid-template-columns:1fr auto;gap:10px}.row .conv,.row .why{grid-column:1/-1}.dg{grid-template-columns:1fr}}
 @media (max-width:480px){.kpis,.agents{grid-template-columns:1fr}}
-
-/* ---- watchlist sidebar: accordion of lists (desktop) / drawer (mobile) ---- */
-.shell{display:grid;grid-template-columns:auto minmax(0,1fr);gap:0;max-width:1480px;margin:0 auto}
-.wl{width:300px;height:100vh;position:sticky;top:0;display:flex;flex-direction:column;padding:22px 14px;gap:12px;overflow:auto;background:color-mix(in srgb,var(--card) 72%,var(--bg));border-right:1px solid var(--line)}
-.wl.collapsed{width:58px;padding:18px 6px;grid-column:1;min-width:58px}
-.wl-top{display:flex;align-items:center;justify-content:space-between;padding:0 4px;gap:8px}
-.wl h2{margin:0;padding:0;font-size:15px;letter-spacing:-.01em;color:var(--ink);font-weight:700}
-.wl h2::after{content:"";display:block;width:24px;height:2px;margin-top:5px;border-radius:4px;background:var(--accent)}
-.menu{display:none;margin-bottom:10px;font-size:13px;padding:6px 12px}
-.wl-top .x{all:unset;cursor:pointer;color:var(--muted);font-size:20px;line-height:1;padding:4px 8px;border-radius:8px;display:none}
-.wl-top .x:focus-visible{outline:2px solid var(--accent)}
-.wl nav{display:flex;flex-direction:column;gap:5px;min-width:0}
-.wl-group{display:flex;flex-direction:column;gap:0}
-.wl.collapsed nav{min-width:0}
-.wl-item{all:unset;box-sizing:border-box;cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:10px;padding:11px 12px;border:1px solid transparent;border-radius:12px;font-size:14px;transition:background .15s,border-color .15s,transform .15s}
-.wl-item:hover{background:var(--soft);transform:translateX(1px)}
-.wl-item[aria-expanded=true]{background:color-mix(in srgb,var(--accent) 12%,var(--card));border-color:color-mix(in srgb,var(--accent) 35%,var(--line));font-weight:650}
-.wl-item:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
-.wl-item small{min-width:25px;padding:2px 7px;border-radius:99px;background:var(--soft);color:var(--muted);font-weight:650;font-size:11px;text-align:center}
-.wl-item[aria-expanded=true] small{background:var(--accent);color:var(--accent-ink)}
-.wl-items{list-style:none;margin:-4px 0 0;padding:8px 4px 8px 10px;border-left:2px solid color-mix(in srgb,var(--accent) 28%,var(--line));}
-.wl-items:empty{display:none}
-.wl-items li{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:7px 9px;font-size:13px;border-radius:9px}
-.wl-items li:hover{background:var(--soft)}
-.wl-items li>div{min-width:0}.wl-items li b{font-weight:650;display:block}.wl-items li small{color:var(--muted);display:block;font-size:11.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:190px}
-.wl-items .x{all:unset;cursor:pointer;color:var(--muted);font-size:15px;padding:0 4px;visibility:hidden}
-.wl-items li:hover .x,.wl-items li .x:focus-visible{visibility:visible}
-.wl-items .stale{color:var(--watch)}
-.wl-hint{color:var(--muted);font-size:12px;padding:10px 12px;line-height:1.45;border:1px solid var(--line);border-radius:11px;background:var(--soft);max-width:none}
-.wl.collapsed .wl-hint{display:none}
-.wl-tools{display:flex;gap:7px;padding:4px 0 0;flex-wrap:wrap;border-top:1px solid var(--line)}
-.wl-tools .btn{flex:1;padding:8px 8px;font-size:12.5px;white-space:nowrap}
-.wl-tools .btn:disabled{opacity:.4}
-.wl.collapsed .wl-tools{flex-direction:column;padding:0 4px}
-.wl.collapsed .wl-tools .btn{flex:1 1 auto;padding:6px}
-.wl.collapsed .wl-top h2{display:none}
-.wl.collapsed .menu{display:none}
 .workspace-tabs{display:flex;gap:4px;margin-top:22px;padding:4px;background:var(--soft);border:1px solid var(--line);border-radius:14px;width:max-content}
 .workspace-tab{border:0;background:transparent;color:var(--muted);padding:9px 18px;border-radius:10px;font:inherit;font-weight:650;cursor:pointer}
 .workspace-tab:hover{color:var(--ink)}.workspace-tab[aria-selected=true]{background:var(--card);color:var(--ink);box-shadow:var(--shadow)}
@@ -139,40 +109,18 @@ footer .foot-main{font-weight:550;color:var(--ink)}
 .watchlist-stock b{display:block;font-size:15px}.watchlist-stock small{display:block;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:170px}
 .watchlist-stock .x{all:unset;cursor:pointer;color:var(--muted);font-size:18px;padding:3px 6px;border-radius:7px}.watchlist-stock .x:hover{background:var(--soft);color:var(--avoid)}
 .watchlist-empty{padding:42px 20px;text-align:center}.watchlist-empty strong{display:block;color:var(--ink);font-size:16px;margin-bottom:5px}.watchlist-empty span{color:var(--muted);font-size:13px}
-.toggle{all:unset;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;width:32px;height:32px;border-radius:10px;color:var(--muted);font-size:15px}
-.toggle:hover{background:var(--soft);color:var(--ink)}
-.toggle:focus-visible{outline:2px solid var(--accent)}
-.scrim{display:none}
-@media (max-width:1024px){
-  .shell{grid-template-columns:1fr}
-  .wl{position:fixed;z-index:20;left:0;top:0;width:min(330px,88vw);height:100dvh;background:var(--card);box-shadow:var(--shadow);transform:translateX(-102%);transition:transform .2s;border-right:1px solid var(--line)}
-  .wl[data-open=true]{transform:none}
-  .wl-top .x,.menu{display:inline-flex}
-  .wl-items{max-height:60vh;overflow:auto}
-  .scrim{position:fixed;inset:0;z-index:15;background:rgba(10,14,22,.4);border:0}
-  .scrim[data-open=true]{display:block}
-}
 </style>
 </head>
 <body>
-<div class="shell">
-<aside class="wl" id="wl" aria-label="Watchlists" data-open="false">
-  <div class="wl-top"><button class="toggle" id="wlShrink" title="Collapse" aria-label="Collapse the watchlist panel">⟨</button><h2>Watchlists</h2><button class="x" id="wlClose" aria-label="Close watchlists">×</button></div>
-  <div class="wl-hint" id="wlHint">Choose a list to manage your stocks.</div>
-  <nav id="wlList" aria-label="Your watchlists"></nav>
-  <div class="wl-tools">
-    <button class="btn ghost" id="wlNew">+ New list</button>
-    <button class="btn ghost" id="wlRename" disabled>Rename</button>
-    <button class="btn ghost" id="wlDel" title="Delete the selected watchlist" disabled>Delete</button>
-  </div>
-</aside>
-<button class="scrim" id="scrim" aria-label="Close watchlists" data-open="false"></button>
 <div class="wrap">
   <header>
-    <div class="brand"><button class="btn ghost menu" id="wlOpen" aria-controls="wl" aria-expanded="false">☰ Watchlists</button><h1>__BRAND__</h1><p id="sub">Indian stock analysis · 8 agents on duty</p></div>
+    <div class="brand"><h1>__BRAND__</h1><p id="sub">Indian stock analysis · 9 agents on duty</p></div>
     <div class="controls">
       <span class="pill" id="fyPill"><i class="dot" id="fyDot"></i><span id="fyLabel">FYERS</span><button class="btn ghost" id="fyBtn">Connect FYERS</button></span>
-      <button class="btn" id="go">Run analysis</button>
+      <div class="runbar">
+        <span class="run-sel"><select id="runWl" aria-label="Watchlist to run" disabled><option>No watchlists</option></select></span>
+        <button class="btn" id="go">Run analysis</button>
+      </div>
     </div>
   </header>
   <div class="focusbar">
@@ -194,6 +142,9 @@ footer .foot-main{font-weight:550;color:var(--ink)}
     <div class="watchlist-toolbar">
       <label for="wlSelect">Selected watchlist</label>
       <select id="wlSelect"></select>
+      <button class="btn ghost" id="wlNew">+ New list</button>
+      <button class="btn ghost" id="wlRename" disabled>Rename</button>
+      <button class="btn ghost" id="wlDel" title="Delete the selected watchlist" disabled>Delete</button>
     </div>
     <div class="card watchlist-summary"><div><h2 id="wlViewName">Watchlist</h2><p id="wlViewMeta">Choose a watchlist to view its stocks.</p></div></div>
     <section class="watchlist-grid" id="wlViewItems"></section>
@@ -212,7 +163,6 @@ footer .foot-main{font-weight:550;color:var(--ink)}
   </section>
   <footer id="foot"><span class="foot-main">Analysis only. No trades are ever placed.</span>
     <span>Conviction (x/10) is an internal score, not a probability of profit. Not investment advice.</span></footer>
-</div>
 </div>
 <script nonce="__NONCE__">
 const $=s=>document.querySelector(s);
@@ -234,7 +184,7 @@ async function loadConfig(){
  if(c.notice)notice(c.notice.level,c.notice.text);
  const q=new URLSearchParams(location.search).get('auth');
  if(q){const n=await(await api('/api/auth-notice/'+encodeURIComponent(q))).json();notice(n.level,n.text);history.replaceState(null,'','/')}
- $('#sub').textContent='Indian stock analysis · 8 agents on duty'+(c.groq?' · LLM panel ready':' · deterministic engine');
+ $('#sub').textContent='Indian stock analysis · 9 agents on duty'+(c.groq?' · LLM panel ready':' · deterministic engine');
 }
 
 function renderAgents(a,focused=false){const g=$('#agents');g.replaceChildren(...Object.entries(a).map(([k,v])=>{ if(focused&&k==='scout')v={...v,role:'Retrieves the selected instrument'};
@@ -252,22 +202,30 @@ function noAnalyst(r){return {'no_analyst_coverage':'No analyst coverage: Yahoo 
  'yfinance_unavailable':'Yahoo/yfinance could not be reached.'}[r]||'Analyst data unavailable.'}
 function renderRow(r){
  const d=r.detail,up=(r.chg||0)>=0;
+ const s3=d.scores3,names3={news_trend:'News/trend',pattern:'Pattern',overall:'Overall'};
+ const overall=s3&&s3.overall&&s3.overall.score!=null?s3.overall.score:null;
  const row=h('div',{class:'card row','data-open':'false'});
  const head=h('button',{class:'head','aria-expanded':'false',onclick:()=>{const o=row.dataset.open!=='true';row.dataset.open=o;head.setAttribute('aria-expanded',o)}},
   h('div',{class:'sym'},h('b',{},r.symbol),chip(r.asset_type||r.cap),h('small',{},r.name)),
-  h('div',{},h('span',{class:'badge '+r.verdict},r.verdict)),
+  h('div',{},h('span',{class:'badge '+r.verdict},r.verdict),overall!=null?h('div',{class:'tag'},'overall '+overall):null),
   h('div',{class:'conv'},h('small',{},`Conviction ${r.confidence}/10 · ${r.winner} won`),h('div',{class:'bar',style:`--v:${r.confidence}`},h('i'))),
   h('div',{},h('div',{class:'px'},fmtPx(r.price)+' ',h('span',{class:up?'up':'dn'},fmtPct(r.chg))),h('div',{class:'why'},r.why)),
   h('span',{class:'caret'},'›'));
  const sc=d.scores,names={bull:'Bull',bear:'Bear',technicals:'Technicals',fundamentals:'Fundamentals',news:'News'};
  const scoreChips=h('div',{class:'sc'},Object.entries(names).map(([k,n])=>h('span',{},n+' ',h('b',{},sc[k]&&sc[k].score!=null?sc[k].score:'n/a'))));
+ const chips3=s3?h('div',{class:'sc'},Object.entries(names3).map(([k,n])=>h('span',{},n+' ',h('b',{},s3[k]&&s3[k].score!=null?s3[k].score:'n/a')))):null;
+ const s3why=s3?[...Object.entries(names3).filter(([k])=>s3[k]&&s3[k].reasons&&s3[k].reasons.length).map(([k,n])=>h('div',{class:'tag'},n+': '+s3[k].reasons.join(' · '))),
+  h('div',{class:'tag'},`Overall formula: ${s3.overall.formula||'n/a'} · chart detector v${(d.chart||{}).detector_version||'?'} (${(d.chart||{}).timeframe||'?'})`)]:[];
+ const ch=d.chart;
+ const patterns=ch&&ch.available?(ch.patterns.length?ch.patterns.map(p=>h('li',{},h('b',{},p.name.replace(/_/g,' ')+': '),`${p.direction} · ${p.status}`+(p.levels&&p.levels.length?' · level '+p.levels.map(fmtPx).join(' / '):'')+(p.start_date?' · '+p.start_date+' → '+p.end_date:''))):[h('li',{},'No reliable pattern identified.')]):[h('li',{},'Chart data unavailable.')];
  const pts=Object.entries(sc).map(([k,v])=>{const lines=v.point?[v.point]:(v.reasons||[]);return lines.length?h('li',{},h('b',{},names[k]+': '),lines.join(' · ')):null}).filter(Boolean);
  const news=(d.news||[]).map(n=>h('li',{},(n.url&&n.url.startsWith('https://'))?h('a',{href:n.url,target:'_blank',rel:'noopener noreferrer'},n.title):n.title,' ',h('span',{class:'tag'},`${n.sentiment||''} ${n.domain?'· '+n.domain:''}`)));
  const an=d.analyst||{};
  const al=r.alert&&r.alert.status!=='none'?h('div',{class:'tag'},`Alert: ${r.alert.status}${r.alert.reason?' — '+r.alert.reason:''}`):null;
- row.append(head,h('div',{class:'detail'},scoreChips,
+ row.append(head,h('div',{class:'detail'},scoreChips,chips3,...s3why,
   h('div',{class:'dg'},
-   h('div',{},h('h4',{},'Panel reasoning'),h('ul',{},pts),d.news_note?h('p',{class:'tag'},d.news_note):null),
+   h('div',{},h('h4',{},'Panel reasoning'),h('ul',{},pts),
+    h('h4',{style:'margin-top:14px'},'Chart patterns'),h('ul',{},patterns),d.news_note?h('p',{class:'tag'},d.news_note):null),
    h('div',{},h('h4',{},'Headlines (headline-only evidence)'),news.length?h('ul',{},news):h('p',{class:'tag'},'No relevant headlines found.'),
     h('h4',{style:'margin-top:14px'},'Analyst data'),
     h('p',{class:'tag'},an.consensus?`Consensus ${an.consensus} · ${an.num_analysts??'?'} analysts · buy ${an.buy_pct??'n/a'}% · target ${fmtPx(an.target_mean)} (${fmtPct(an.upside_pct)})`:noAnalyst(d.analyst_reason)),
@@ -348,7 +306,7 @@ function renderWatchlistView(){
  $('#wlSelect').replaceChildren(...WLS.map(w=>h('option',{value:w.id},w.name+' · '+w.count)));
  if(cur)$('#wlSelect').value=cur.id;
  $('#wlViewName').textContent=cur?cur.name:'No watchlist selected';
- $('#wlViewMeta').textContent=cur?`${cur.count} stock${cur.count===1?'':'s'} · Search above to add another instrument.`:'Create a watchlist to get started.';
+ $('#wlViewMeta').textContent=cur?`${cur.count} stock${cur.count===1?'':'s'} · Search above to add another instrument.`:'No watchlists yet — use the + New list button above to create one.';
  $('#wlViewItems').replaceChildren(...(cur&&cur.items.length?cur.items.map(i=>h('div',{class:'card watchlist-stock'},h('div',{},h('b',{},i.symbol),h('small',{},i.name)),h('button',{class:'x','aria-label':`Remove ${i.symbol}`,title:'Remove from watchlist',onclick:e=>{e.preventDefault();e.stopPropagation();removeStock(i.provider_symbol)}},'×'))):[h('div',{class:'card watchlist-empty'},h('strong',{},'Your watchlist is empty'),h('span',{},'Search for a stock above and choose Add to watchlist.'))]));
 }
 function setWorkspace(mode){
@@ -362,34 +320,20 @@ function setWorkspace(mode){
 }
 $('#analysisTab').onclick=()=>setWorkspace('analysis');
 $('#watchlistTab').onclick=()=>setWorkspace('watchlist');
-$('#wlSelect').onchange=()=>{wActive=$('#wlSelect').value;renderWatchlists();renderWatchlistView()};
+$('#wlSelect').onchange=()=>{wActive=$('#wlSelect').value;renderWatchlistView();drawState()};
+$('#runWl').onchange=()=>{wActive=$('#runWl').value;renderWatchlistView();drawState()};
 function drawState(){const cur=WLS.find(w=>w.id===wActive),n=(cur&&cur.count)||0,empty=wActive==null||n===0;
  const watchlistAction=workspace==='watchlist';
- $('#go').disabled=running||(watchlistAction?!chosen:empty);$('#go').textContent=running?'Working…':watchlistAction?'Add to watchlist':empty?'Run analysis':'Run · '+cur.name;
- $('#wlRename').disabled=!cur;$('#wlDel').disabled=!cur||WLS.length<2;
- $('#wlHint').textContent=empty?(WLS.length?'This list is empty. Search for a stock above and add it here.':'Create your first list to start organising stocks.'):`${cur.name} · ${n} stock${n===1?'':'s'} · runs analyse this list only`;}
-function renderWatchlists(){if(window.matchMedia('(max-width:1024px)').matches)drawer(false);
- const cur=WLS.find(w=>w.id===wActive);
- const stockItems=w=>w.id===wActive?(w.items.length?w.items.map(i=>h('li',{},h('div',{},h('b',{},i.symbol),h('small',{},i.in_catalogue===false?i.name+' · not in current symbol list':i.name)),
-   h('button',{class:'x','aria-label':`Remove ${i.symbol}`,title:'Remove from watchlist',onclick:e=>{e.preventDefault();e.stopPropagation();removeStock(i.provider_symbol)}},'×'))):[h('li',{},h('small',{class:'stale'},'No stocks yet — add one from search.'))]):[];
- $('#wlList').replaceChildren(...(WLS.length?WLS.map(w=>h('div',{class:'wl-group'},
-   h('button',{class:'wl-item',type:'button','aria-expanded':String(w.id===wActive),onclick:()=>selectList(w.id)},h('span',{},w.name),h('small',{},String(w.count))),
-   ...(w.id===wActive?[h('ul',{class:'wl-items',id:'wlItems','aria-label':`Stocks in ${w.name}`},...stockItems(w))]:[]))):[h('div',{class:'empty',style:'padding:20px 8px;font-size:13px'},'No watchlists yet')]));
- drawState()}
+ $('#runWl').value=wActive||'';$('#runWl').disabled=!WLS.length;
+ $('#go').disabled=running||(watchlistAction?!chosen:empty);$('#go').textContent=running?'Working…':watchlistAction?'Add to watchlist':'Run analysis';
+ $('#wlRename').disabled=!cur;$('#wlDel').disabled=!cur||WLS.length<2;}
 function applyWatchlists(d,active){WLS=d.watchlists||[];
  if(active!=null)wActive=active;else if(!WLS.some(w=>w.id===wActive))wActive=WLS.length?WLS[0].id:null;
- renderWatchlists();renderWatchlistView()}
+ $('#runWl').replaceChildren(...(WLS.length?WLS.map(w=>h('option',{value:w.id},w.name+' · '+w.count)):[h('option',{},'No watchlists')]));
+ renderWatchlistView();drawState()}
 async function loadWatchlists(){try{const r=await api('/api/watchlists');const d=await r.json();
  if(!r.ok){notice('bad',d.message||'Watchlists are unavailable.');return}
  applyWatchlists(d)}catch(e){notice('bad','Could not load watchlists ('+e.message+').')}}
-function selectList(id){
- if(id===wActive){wActive=null}else{wActive=id}   // click the open list again → collapse it
- renderWatchlists();
- if(wActive!=null&&window.matchMedia('(max-width:1024px)').matches)drawer(false)}
-function drawer(open){$('#wl').dataset.open=String(open);$('#scrim').dataset.open=String(open);$('#wlOpen').setAttribute('aria-expanded',String(open))}
-$('#wlOpen').onclick=()=>drawer(true);$('#wlClose').onclick=$('#scrim').onclick=()=>drawer(false);
-$('#wlShrink').onclick=()=>{$('#wl').classList.toggle('collapsed');renderWatchlists()};
-document.addEventListener('keydown',e=>{if(e.key==='Escape'&&$('#wl').dataset.open==='true')drawer(false)});
 async function wlSend(method,path,body){const r=await api(path,{method,body:body?JSON.stringify(body):undefined});
  const d=await r.json().catch(()=>({}));
  if(!r.ok){notice('bad',d.message||'Watchlist storage is unavailable right now.');return null}

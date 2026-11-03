@@ -1,5 +1,5 @@
 # Watchlists and Chart-Pattern Agent — Implementation Plan
-**Status:** Implemented — Phase 1 (Supabase watchlists + one-time `universe.json` import, which is now deleted from the codebase). Phases 3–4 (chart stage, three scores) are still to do.  
+**Status:** Implemented — Phases 1–4. Phase 1: Supabase watchlists + one-time `universe.json` import (file now deleted). Phase 2: watchlist UI. Phase 3: `chart_patterns.py` detector + Chart Analyst pipeline stage (reuses Technician candles). Phase 4: shadow `scores3` block in `scoring.py`, wired into grounding/LLM/dashboard. Phase 5 (backtest harness) remains open.  
 **Prepared:** 2026-11-01  
 **Project:** Signal Desk  
 **Scope:** Add user-managed watchlists backed by Supabase Postgres; add a conservative, explainable chart-analysis support stage for Bull/Bear/Judge. Preserve the existing stock-search behavior and analysis-only safety posture.

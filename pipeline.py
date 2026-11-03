@@ -6,6 +6,7 @@ import time
 from datetime import datetime, timezone
 
 import data_sources as ds
+import chart_patterns as cp
 import evidence as ev
 import llm
 import news as newsmod
@@ -20,6 +21,7 @@ log = logging.getLogger("pipeline")
 AGENTS = [
     ("scout", "Scout", "Screens the watchlist by day move"),
     ("technician", "Technician", "RVOL, trend, 52-week range"),
+    ("chart", "Chart Analyst", "Patterns from completed daily candles"),
     ("fundamentalist", "Fundamentalist", "Analyst consensus and targets"),
     ("newsdesk", "Newsdesk", "Fresh headlines and tone"),
     ("bull", "Bull", "Argues the case to buy"),
@@ -196,12 +198,26 @@ class Pipeline:
                 daily = self._fyers_call(provider.daily_candles, e["fyers"])
                 intra = self._fyers_call(provider.intraday_candles, e["fyers"]) if session == "open" else None
                 technicals, rng, gaps = ev.technicals_from_daily(daily, quotes[e["fyers"]], intra, session)
-                out[e["symbol"]] = (technicals, rng, gaps)
+                out[e["symbol"]] = (technicals, rng, gaps, daily)  # candles ride along for the Chart Analyst
             except FyersError as err:  # _fyers_call already re-raised rate limits/auth as RunAbort
-                out[e["symbol"]] = (None, None, [f"technicals({err.kind})"])
+                out[e["symbol"]] = (None, None, [f"technicals({err.kind})"], None)
         rv = [t[0]["rvol"] for t in out.values() if t[0] and t[0].get("rvol")]
         self._agent("technician", "done", analyzed=len(out),
                     **{"avg RVOL" if len(out) > 1 else "RVOL": f"{sum(rv) / len(rv):.2f}x" if rv else "n/a"})
+        return out
+
+    def _chart(self, entries, tech, quotes, session):
+        """Chart Analyst: evidence stage, not a decision agent. Reuses the Technician's completed daily
+        candles — never a second market-data request. Patterns never override the Judge on their own."""
+        self._agent("chart", "working")
+        out = {}
+        for e in entries:
+            t = tech[e["symbol"]]
+            daily = t[3] if t and t[0] is not None else None
+            out[e["symbol"]] = (cp.analyze(daily, quotes[e["fyers"]].get("live"), session)
+                                if daily is not None else (None, ["chart.unavailable"]))
+        found = sum(1 for c, _ in out.values() if c and c["status"] == "ok")
+        self._agent("chart", "done", analyzed=len(out), patterns=found)
         return out
 
     def _fundamentals(self, entries, quotes):
@@ -263,10 +279,12 @@ class Pipeline:
             raise RunAbort("No stocks passed the Scout screen (no valid quotes).")
         session = ev.market_session()
         tech = self._technicals(provider, short, quotes, session)
+        chart = self._chart(short, tech, quotes, session)
         fund = self._fundamentals(short, quotes)
         nws = self._news(short, fund)
-        bundles = [self._bundle(e, quotes[e["fyers"]], tech[e["symbol"]], fund[e["symbol"]], nws[e["symbol"]],
-                                self._yf_map[e["symbol"]], retrieved, session) for e in short]
+        bundles = [self._bundle(e, quotes[e["fyers"]], tech[e["symbol"]], chart[e["symbol"]],
+                                fund[e["symbol"]], nws[e["symbol"]], self._yf_map[e["symbol"]], retrieved, session)
+                   for e in short]
         self._warn_market(session, bundles)
         return bundles, len(entries)
 
@@ -291,16 +309,18 @@ class Pipeline:
         self._set(pulled_at=ev.now_ist().strftime("%d %b %Y, %H:%M IST"), message="Focused analysis in progress.")
         session = ev.market_session()
         tech = self._technicals(provider, [entry], quotes, session)
+        chart = self._chart([entry], tech, quotes, session)
         fund = self._fundamentals([entry], quotes)
         nws = self._news([entry], fund)
-        bundle = self._bundle(entry, q, tech[entry["symbol"]], fund[entry["symbol"]], nws[entry["symbol"]],
-                              self._yf_map[entry["symbol"]], retrieved, session)
+        bundle = self._bundle(entry, q, tech[entry["symbol"]], chart[entry["symbol"]],
+                              fund[entry["symbol"]], nws[entry["symbol"]], self._yf_map[entry["symbol"]],
+                              retrieved, session)
         self._warn_market(session, [bundle])
         if self._yf_map[entry["symbol"]] is None:
             self._warn("No verified yfinance listing for this instrument: analyst data is reported as a gap, not guessed.")
         return [bundle], 1
 
-    def _bundle(self, entry, quote, tech, fund, news_block, yf_sym, retrieved, session):
+    def _bundle(self, entry, quote, tech, chart, fund, news_block, yf_sym, retrieved, session):
         """Assemble one evidence bundle; a failed Technician slot degrades to explicit nulls, never an exception.
         yf_sym is the verified yfinance ticker (None = not mapped); `source` still names the configured feed."""
         t, rng, tg = tech[:3]
@@ -308,13 +328,16 @@ class Pipeline:
             t = {"rvol": None, "rvol_method": None, "price_vs_sma_pct": None, "sma_period": 10, "window_return_pct": None,
                  "swing_high": None, "swing_low": None, "day_range_position_pct": None, "trend": None}
             rng = {"high": None, "low": None, "pct_from_high": None, "position_pct": None, "basis": "unavailable"}
+        ch, cg = chart
         an, _meta, fg, _ticker = fund
         nb, ng = news_block
         src = {"price": "fyers", "candles": "fyers", "analyst": "yfinance",
                "news": "google_news+yfinance+gdelt" if yf_sym else "google_news+gdelt"}
         bundle = ev.assemble_bundle(entry, quote, t, rng, an, nb, src, retrieved,
-                                   list(tg or []) + list(fg) + list(ng),
+                                   list(tg or []) + list(cg or []) + list(fg) + list(ng),
                                    max_age=self.s.quote_max_age_sec, session=session)
+        if ch:
+            bundle["chart"] = ch
         return bundle
 
     def _record_focused(self, bundles, run_id):
@@ -411,6 +434,7 @@ class Pipeline:
                 "guards": r["validation"].get("guards", []),
                 "detail": {"scores": {k: {"score": s.get("score"), "point": s.get("point"),
                                          "reasons": [x["text"] for x in s.get("reasons", [])]} for k, s in r["scores"].items()},
+                           "scores3": r.get("scores3"), "chart": b.get("chart"),
                            "news": [{"title": n["title"], "domain": n.get("domain"), "url": n.get("url"),
                                      "sentiment": n.get("sentiment"), "published_at": n.get("published_at")}
                                     for n in b["news"]["recent"] if not n.get("suspicious")],

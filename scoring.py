@@ -134,3 +134,64 @@ def evaluate_deterministic(b, facts):
                        **{k: {"score": v} for k, v in subs.items()}},
             "verdict": j, "engine": "deterministic", "model": None, "fallback_reason": None,
             "validation": {"passed": True, "issues": []}, "news_interpretation": None}
+
+
+# ---- three shadow scores (news/trend, chart pattern, overall) ----
+# Computed in Python only. The LLM panel may read them as non-citable context but never changes them,
+# and no verdict/alert rule consumes them yet. Abstention is explicit (score None), never a fake 0.
+_OVERALL_W = (0.6, 0.4)  # news_trend, pattern
+
+
+def _news_trend(b):
+    n = b.get("news") or {}
+    tot = n.get("positive", 0) + n.get("negative", 0)
+    news = None if tot == 0 else round(n["positive"] / tot * 100)
+    t = b.get("technicals") or {}
+    trend = {"up": 85, "sideways": 50, "down": 15}.get(t.get("trend"))
+    reasons = ([f"Headline tone {news}/100 ({n['positive']}+ vs {n['negative']}-)"] if news is not None else []) + \
+              ([f"Trend {t['trend']} maps to {trend}/100"] if trend is not None else [])
+    parts = [x for x in (news, trend) if x is not None]
+    if not parts:
+        return None, False, ["No headline tone or trend data."]
+    score = round(sum(parts) / len(parts))
+    wr = t.get("window_return_pct")
+    if wr is not None:
+        adj = 5 if wr > 0 else -5 if wr < 0 else 0
+        score = max(0, min(100, score + adj))
+        reasons.append(f"~1-month return {wr:+.1f}% adjusts by {adj:+d}")
+    return score, True, reasons
+
+
+def _pattern_score(chart):
+    if not chart or not chart.get("available"):
+        return None, False, ["Chart data unavailable (insufficient or missing candles)."]
+    scored = [(p, round(50 * p.get("confidence", 0) * (1 if p.get("direction") == "bullish" else -1)))
+              for p in chart.get("patterns", []) if p.get("status") == "confirmed"
+              and p.get("direction") in ("bullish", "bearish")]
+    if not scored:
+        return None, True, [f"Chart stage abstained: {chart.get('status')}."]
+    net = sum(d for _, d in scored)
+    return max(0, min(100, 50 + net)), True, [f"{p['name']} ({p['direction']}) contributes {d:+d}" for p, d in scored]
+
+
+def _overall(nt, pat):
+    parts = [x for x in ((nt[0], _OVERALL_W[0]), (pat[0], _OVERALL_W[1])) if x[0] is not None]
+    if not parts:
+        return None, False, ["Both components unavailable: no overall score."], None
+    if len(parts) == 1:
+        return parts[0][0], True, ["One component available; overall equals it."], "single_component"
+    return (round(sum(s * w for s, w in parts)), True,
+            [f"{_OVERALL_W[0]}*news_trend + {_OVERALL_W[1]}*pattern"],
+            f"{_OVERALL_W[0]}*news_trend + {_OVERALL_W[1]}*pattern")
+
+
+def scores3(b):
+    """The plan's three-score block (higher = more bullish, 0-100). Shadow mode: verdicts and alerts
+    never read it. Each component carries score/available/reasons; overall carries its formula."""
+    nt = _news_trend(b)
+    pat = _pattern_score(b.get("chart"))
+    ov = _overall(nt, pat)
+    return {"schema_version": 1,
+            "news_trend": {"score": nt[0], "available": nt[1], "reasons": nt[2]},
+            "pattern": {"score": pat[0], "available": pat[1], "reasons": pat[2]},
+            "overall": {"score": ov[0], "available": ov[1], "reasons": ov[2], "formula": ov[3]}}

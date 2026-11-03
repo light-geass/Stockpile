@@ -276,7 +276,42 @@ def test_agent_order_preserved_in_api(mk):
     from tests.conftest import LOCAL
     app, _ = mk()
     keys = list(app.test_client().get("/api/status", base_url=LOCAL).json["agents"])
-    assert keys == ["scout", "technician", "fundamentalist", "newsdesk", "bull", "bear", "judge", "messenger"]
+    assert keys == ["scout", "technician", "chart", "fundamentalist", "newsdesk", "bull", "bear", "judge", "messenger"]
+
+
+def test_chart_stage_reuses_candles_and_attaches_scores3(mk, monkeypatch):
+    """Chart Analyst must analyse the Technician's daily candles (one history request per stock, never a
+    re-fetch) and every verdict detail must carry the Python-computed three-score block plus the chart report."""
+    monkeypatch.setattr(ev, "market_session", lambda now=None: "open")
+
+    class Counting(FakeProvider):
+        def __init__(self):
+            super().__init__()
+            self.daily_calls = 0
+
+        def daily_candles(self, sym, days=366):
+            self.daily_calls += 1
+            today = datetime.now(IST).replace(hour=0, minute=0, second=0, microsecond=0)
+            out = []
+            for j in range(250):  # triangle wave with upward drift: strict pivots every 12 bars
+                d = today - timedelta(days=250 - j)
+                m = j % 12
+                px = 200 + 1.5 * (j // 12) + 4 * (m if m < 6 else 12 - m)
+                out.append({"t": int(d.timestamp()), "o": px - 0.5, "h": px + 1, "l": px - 1,
+                            "c": px, "v": 1_000_000})
+            return out
+
+    fp = Counting()
+    app, _ = mk(live_env(), {"fyers": fp, "gdelt": FakeGdelt(), "yf": FakeYF})
+    st = run(app, "live")
+    assert st["status"] == "done" and st["agents"]["chart"]["status"] == "done"
+    n = len(st["verdicts"])
+    assert fp.daily_calls == n and st["agents"]["chart"]["stats"]["analyzed"] == n  # candles reused, not re-fetched
+    for v in st["verdicts"]:
+        d = v["detail"]
+        assert d["chart"]["status"] == "ok" and d["chart"]["timeframe"] == "1D"
+        assert any(p["name"] == "swing_structure" for p in d["chart"]["patterns"])
+        assert d["scores3"]["schema_version"] == 1 and d["scores3"]["pattern"]["score"] is not None
 
 
 # ---------- focused run (search & select) ----------

@@ -9,7 +9,7 @@ import time
 import requests
 
 from grounding import build_facts, verify_statement
-from scoring import evaluate_deterministic, leadership, sub_scores
+from scoring import evaluate_deterministic, leadership, scores3, sub_scores
 from security import redact
 
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
@@ -42,7 +42,9 @@ Rules:
 6. BUY only for a genuinely favourable risk/reward WITH confirmation (momentum/volume). Otherwise WATCH or AVOID.
 7. Scores are 0-100 integers (Bull and Bear argue their side). Confidence is a 1-10 internal conviction score, not a probability of profit.
 8. Do not write your bull/bear scores as numbers in any point, rationale or news_interpretation text: they are not
-   evidence, and the only numbers allowed in prose are ones you cite from facts (E*) or headlines (N*).
+   evidence, and the only numbers allowed in prose are ones you cite from facts (E*) or headlines (N*). The three
+   shadow scores (news/trend, pattern, overall) are Python-computed context, not citable facts: you may discuss
+   chart patterns you cite as facts, but never state or restate any score number or invent detections/levels.
 9. Reply with the JSON object only."""
 
 
@@ -164,12 +166,18 @@ def _extract_json(text):
 
 
 def _context(ref):
-    """Non-citable context: the deterministic engine's own 0-100 scores. They are in the prompt (numbers_in keeps
-    0-100 integers) because a judge that names the bull/bear scores would otherwise trip the grounding check."""
+    """Non-citable context: the deterministic engine's own 0-100 scores and the shadow three-score block. They are
+    in the prompt (numbers_in keeps 0-100 integers) because a judge that names the bull/bear scores would otherwise
+    trip the grounding check."""
     s = ref["scores"]
+    s3 = ref.get("scores3") or {}
+    pick = lambda k: s3.get(k, {}).get("score")
     return {"deterministic_engine": {"note": "internal scores, not citable evidence ids",
                                      "bull": s["bull"]["score"], "bear": s["bear"]["score"],
-                                     "verdict": ref["verdict"]["verdict"]}}
+                                     "verdict": ref["verdict"]["verdict"]},
+            "shadow_scores": {"note": "Python-computed, not citable evidence ids; never restate them",
+                              "news_trend": pick("news_trend"), "pattern": pick("pattern"),
+                              "overall": pick("overall")}}
 
 
 def build_messages(bundle, facts, news, extra="", ref=None):
@@ -225,9 +233,12 @@ def _from_llm(o, b, ref, model):
 
 
 def evaluate(bundle, settings, client=None):
-    """Unified interface. Returns result dict with engine/model/fallback_reason/validation. Never raises."""
+    """Unified interface. Returns result dict with engine/model/fallback_reason/validation. Never raises.
+    The shadow three-score block is computed in Python once and attached to whichever engine wins."""
     facts, news, index = build_facts(bundle)
     ref = evaluate_deterministic(bundle, facts)
+    s3 = scores3(bundle)
+    ref["scores3"] = s3
     if client is None:
         ref["fallback_reason"] = "no_api_key"
         return ref
@@ -240,7 +251,9 @@ def evaluate(bundle, settings, client=None):
             if not issues:
                 issues = ground_check(o, facts, news, index)
                 if not issues:
-                    return _from_llm(o, bundle, ref, client.model)
+                    r = _from_llm(o, bundle, ref, client.model)
+                    r["scores3"] = s3
+                    return r
                 reason = "grounding_failed"
             else:
                 reason = "invalid_output"
