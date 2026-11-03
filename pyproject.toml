@@ -1,0 +1,8 @@
+[tool.pyright]
+extraPaths = [
+    ".",
+    "engine",
+    "agents",
+    "market",
+    "services"
+]

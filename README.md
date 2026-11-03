@@ -123,7 +123,45 @@ in FYERS settings and `.env` (scheme, host, path, no trailing slash differences)
   PATCH and DELETE are CSRF- and Origin-checked like POST. The last list cannot be deleted.
 * Lists are shared by everyone who can unlock the dashboard; there is no per-user account model.
 
-## 7. Layout
-`app.py` routes+security · `fyers_auth.py` OAuth/token store · `fyers_client.py` read-only data client · `instrument_search.py` NSE symbol-master catalogue/search · `data_sources.py` watchlist entries/yfinance · `evidence.py` indicators+bundle · `news.py` · `grounding.py` evidence IDs/number checks · `scoring.py` deterministic engine · `llm.py` Groq panel+alert rules · `pipeline.py` orchestration · `notifier.py` Telegram · `storage.py` SQLite audit · `watchlists.py` Supabase watchlist store · `UI/` (modular dashboard).
+## 7. Architecture & Directory Layout
+
+```
+stock-agents/
+├── UI/                     # Modern glassmorphic frontend (index.html, styles.css, app.js)
+├── engine/                 # Multi-agent debate orchestration, scoring & playbook
+│   ├── pipeline.py         # Autonomous debate coordinator & run lifecycle
+│   ├── scoring.py          # Conviction scoring, weighted consensus & debate judge
+│   ├── evidence.py         # Multi-factor market evidence extraction & normalization
+│   ├── playbook.py         # Near-close / BTST execution action plans
+│   └── sizing.py           # Position sizing & risk budgeting
+├── agents/                 # Specialized market analysis agents & ML predictors
+│   ├── chart_patterns.py   # Technician Agent: candlestick patterns & RVOL
+│   ├── regime.py           # Macro Sentinel: market regime detection
+│   ├── grounding.py        # Fact Checker: anti-hallucination verification
+│   ├── llm.py              # LLM clients (Groq / OpenAI) & multi-agent debate
+│   ├── predict.py          # Probability calibration & Brier scoring
+│   └── outcomes.py         # Settlement tracker & historical accuracy ledger
+├── market/                 # Market feeds, broker connectors, symbol master & news
+│   ├── data_sources.py     # Market feed dispatcher (Fyers / YFinance / AlphaVantage)
+│   ├── fyers_client.py     # FYERS API v3 REST client & rate limiting
+│   ├── instrument_search.py# NSE / BSE symbol master & fast in-memory search
+│   ├── news.py             # News desk, RSS parser & sentiment scoring
+│   ├── events.py           # RBI calendar & corporate earnings dates
+│   ├── etf.py              # ETF analysis & NAV tracking
+│   └── ipo.py              # Listed IPO analysis
+├── services/               # Cross-cutting platform services
+│   ├── config.py           # Environment configuration & Settings dataclass
+│   ├── storage.py          # SQLite audit trail & verdict persistence
+│   ├── security.py         # Token redaction, CSRF protection & session crypto
+│   ├── watchlists.py       # Watchlist store (Supabase Postgres / in-memory fallback)
+│   └── notifier.py         # Telegram alerts & outbound notifications
+├── docs/                   # Documentation & data sources reference
+│   └── DATA_SOURCES.md     # External APIs & data feeds specification
+├── tests/                  # Pytest test suite (197 automated tests)
+├── data/                   # SQLite audit store
+├── app.py                  # Single-command Flask server & API gateway
+├── requirements.txt        # Python package dependencies
+└── README.md               # Architecture & quickstart guide
+```
 
 *Not investment advice. Educational software; no warranty.*

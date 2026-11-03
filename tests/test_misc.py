@@ -43,6 +43,7 @@ def test_technicals_full_day_rvol_flagged_when_market_open():
     daily = [candle((now - timedelta(days=k)).date(), 0, 0, 1000, 100 + (250 - k) * 0.1) for k in range(250, 0, -1)]
     q = {"live": 130.0, "day_high": 131, "day_low": 128, "volume": 3000}
     t, r, _ = ev.technicals_from_daily(daily, q, None, "open", now)
+    # pyrefly: ignore[not-iterable]
     assert t["rvol"] == 3.0 and "UNADJUSTED" in t["rvol_method"] and r["position_pct"] is not None
 
 
@@ -73,7 +74,7 @@ def test_fyers_tt_never_makes_a_quote_stale():
     # and a provider that DOES supply a real quote time is still judged live
     b2 = ev.assemble_bundle({"symbol": "X"}, {"live": 100.0, "quote_epoch": int(time.time()) - 5}, {}, {},
                             ev.empty_analyst(), {"total": 0}, {}, datetime.now(timezone.utc), [], session="open")
-    assert b2["freshness"] == "live" and 5 <= b2["quote_age_sec"] <= 7
+    assert b2["freshness"] == "live" and b2["quote_age_sec"] is not None and 5 <= b2["quote_age_sec"] <= 7
 
 
 def test_grounding_number_checks():
@@ -154,8 +155,9 @@ def test_gdelt_failure_is_a_data_gap():
 
 def test_no_order_or_trading_endpoints_anywhere():
     bad = re.compile(r"/orders|place_?order|order_?book|/positions|/holdings|/funds|tradebook|orders\.json", re.I)
-    for f in ROOT.glob("*.py"):
-        assert not bad.search(f.read_text()), f"trading endpoint reference in {f.name}"
+    py_files = [f for f in ROOT.rglob("*.py") if not any(p.startswith(".") or p in ("tests", "__pycache__") for p in f.parts)]
+    for f in py_files:
+        assert not bad.search(f.read_text(encoding="utf-8")), f"trading endpoint reference in {f.name}"
 
 
 def test_repo_hygiene():

@@ -11,24 +11,32 @@ import secrets
 import threading
 import time
 from datetime import datetime, timedelta
+import sys
 from pathlib import Path
+
+BASE = Path(__file__).resolve().parent
+
+for _p in (BASE, BASE / "engine", BASE / "agents", BASE / "market", BASE / "services"):
+    _sp = str(_p)
+    if _sp not in sys.path:
+        sys.path.insert(0, _sp)
 
 from flask import Flask, Response, abort, jsonify, redirect, request, session, url_for
 from flask.sessions import SecureCookieSessionInterface
 from markupsafe import escape
 
-import config
-import evidence as ev
-import outcomes
-import predict
-from fyers_auth import AuthError, FyersAuth, TokenStore
-from fyers_client import FyersClient, RateLimiter
-from instrument_search import (CatalogueError, InstrumentCatalogue, MAX_QUERY as SEARCH_MAX_QUERY,
+import services.config as config
+import engine.evidence as ev
+import agents.outcomes as outcomes
+import agents.predict as predict
+from market.fyers_auth import AuthError, FyersAuth, TokenStore
+from market.fyers_client import FyersClient, RateLimiter
+from market.instrument_search import (CatalogueError, InstrumentCatalogue, MAX_QUERY as SEARCH_MAX_QUERY,
                                MIN_QUERY as SEARCH_MIN_QUERY)
-from pipeline import Pipeline
-from security import install_log_redaction, redact
-from storage import Store
-from watchlists import WatchlistError, WatchlistStore
+from engine.pipeline import Pipeline
+from services.security import install_log_redaction, redact
+from services.storage import Store
+from services.watchlists import WatchlistError, WatchlistStore
 
 log = logging.getLogger("app")
 BASE = Path(__file__).resolve().parent
@@ -75,12 +83,14 @@ def create_app(settings=None, deps=None, store_path=None):
                       PERMANENT_SESSION_LIFETIME=8 * 3600, MAX_CONTENT_LENGTH=64 * 1024)
     app.session_interface = HostAwareSessionInterface()
     app.debug = False
+    # pyrefly: ignore[missing-attribute]
     app.json.sort_keys = False  # keep agent pipeline order in JSON
     install_log_redaction(s.secret_values)
 
     store = Store(store_path or (s.data_dir / "audit.sqlite3"), s.secret_values())
     auth = FyersAuth(s, TokenStore(config.LOCAL_DIR / "fyers_token.json"), (deps or {}).get("http", __import__("requests")))
     watchlists = (deps or {}).get("watchlists") or WatchlistStore(s.database_url, s.watchlist_max_items)
+    # pyrefly: ignore[bad-argument-type]
     pipe = Pipeline(s, auth, store, deps, watchlists)
     catalogue = (deps or {}).get("catalogue") or InstrumentCatalogue(s.instrument_catalogue_url,
                                                                      s.instrument_catalogue_ttl)
@@ -139,11 +149,12 @@ def create_app(settings=None, deps=None, store_path=None):
 
     @app.get("/")
     def index():
-        request._nonce = secrets.token_urlsafe(16)
+        nonce = secrets.token_urlsafe(16)
+        setattr(request, "_nonce", nonce)
         session.permanent = True
         session.setdefault("csrf", secrets.token_urlsafe(32))
         html = (BASE / "UI" / "index.html").read_text(encoding="utf-8")
-        html = html.replace("__NONCE__", request._nonce).replace("__CSRF__", session["csrf"]).replace("__BRAND__", str(escape(s.brand)))
+        html = html.replace("__NONCE__", nonce).replace("__CSRF__", session["csrf"]).replace("__BRAND__", str(escape(s.brand)))
         return Response(html, mimetype="text/html")
 
     @app.get("/styles.css")
@@ -158,7 +169,7 @@ def create_app(settings=None, deps=None, store_path=None):
 
     @app.route("/unlock", methods=["GET", "POST"])
     def unlock():
-        request._nonce = ""
+        setattr(request, "_nonce", "")
         msg = ""
         if request.method == "POST":
             now = time.time()
@@ -403,7 +414,7 @@ def create_app(settings=None, deps=None, store_path=None):
 
     # ---------------- FYERS OAuth ----------------
     def err_page(title, detail, code=400):
-        request._nonce = ""
+        setattr(request, "_nonce", "")
         return Response(f"<!doctype html><meta charset=utf-8><title>{escape(title)}</title><body style='font-family:system-ui;max-width:560px;"
                         f"margin:12vh auto;padding:0 20px;color:#1d2433'><h2>{escape(title)}</h2><p>{detail}</p><p><a href='/'>Back to dashboard</a></p>",
                         status=code, mimetype="text/html")
@@ -507,7 +518,7 @@ def retrain_if_due(app, store, s, now=None):
     if last_dt and (now - last_dt).days < 7:
         return None
     try:
-        import predict
+        import agents.predict as predict
         result = predict.train_all(store, s.horizons)
         store.kv_set("model_trained_at", now.isoformat())
         shipped = [h for h, m in result.items() if m.get("shipped")]

@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlparse
 
-BASE_DIR = Path(__file__).resolve().parent
+BASE_DIR = Path(__file__).resolve().parent.parent
 LOCAL_DIR = BASE_DIR / ".local"
 DATA_DIR = BASE_DIR / "data"
 LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "[::1]"}

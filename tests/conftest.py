@@ -4,7 +4,10 @@ from pathlib import Path
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+ROOT = Path(__file__).resolve().parent.parent
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+import _bootstrap  # noqa: F401, E402
 import config  # noqa: E402
 from app import create_app  # noqa: E402
 from watchlists import UNIVERSE_SEED  # noqa: E402
