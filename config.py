@@ -48,6 +48,15 @@ def _s(name, default=""):
     return os.environ.get(name, "").strip() or default
 
 
+def _csv_ints(name, default):
+    raw = os.environ.get(name, "").strip() or default
+    try:
+        xs = tuple(int(x.strip()) for x in raw.split(",") if x.strip())
+        return xs or tuple(int(x) for x in default.split(","))
+    except ValueError:
+        return tuple(int(x) for x in default.split(","))
+
+
 def local_secret(name, env_value=""):
     """Return env value, else a random secret persisted (0600) in the gitignored .local dir."""
     if env_value:
@@ -95,6 +104,14 @@ class Settings:
     instrument_catalogue_ttl: int
     database_url: str
     watchlist_max_items: int
+    event_guard_days: int
+    regime_guard: bool
+    model_enabled: bool
+    settle_hour_ist: int
+    benchmark_symbol: str
+    horizons: tuple
+    sme_watch_until_checklist: bool
+    risk_budget_inr: float
     data_dir: Path
 
     @classmethod
@@ -128,6 +145,14 @@ class Settings:
             instrument_catalogue_ttl=_i("INSTRUMENT_CATALOGUE_TTL", 21600),  # 6 h; file changes far slower
             database_url=_s("SUPABASE_DATABASE_URL"),  # server-side connection string; never sent to the browser
             watchlist_max_items=_i("WATCHLIST_MAX_ITEMS", 50),
+            event_guard_days=_i("EVENT_GUARD_DAYS", 1),
+            regime_guard=_b("REGIME_GUARD", True),
+            model_enabled=_b("MODEL_ENABLED", False),
+            settle_hour_ist=_i("SETTLE_HOUR_IST", 19),
+            benchmark_symbol=_s("BENCHMARK_SYMBOL", "NIFTYBEES"),
+            horizons=_csv_ints("HORIZONS", "1,5,20,60"),
+            sme_watch_until_checklist=_b("SME_WATCH_UNTIL_CHECKLIST", True),
+            risk_budget_inr=_f("RISK_BUDGET_INR", 10000),
             data_dir=Path(_s("DATA_DIR", str(DATA_DIR))).resolve(),
         )
 

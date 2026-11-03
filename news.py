@@ -1,5 +1,6 @@
 """Newsdesk: yfinance news + Google News RSS (supplementary) + GDELT DOC 2.0 (last resort). Headline-only evidence.
 Dedupe, company-relevance filter, prompt-injection flagging. Sentiment = transparent headline lexicon heuristic."""
+import hashlib
 import re
 import threading
 import time
@@ -178,7 +179,28 @@ def google_news(query, http=requests, days=7, max_items=15):
     return out, None
 
 
-def build_news(entry, gdelt, yf_ticker=None, max_recent=8, gnews=None):
+def fingerprint(title):
+    return hashlib.sha1(" ".join(sorted(_norm(title))).encode()).hexdigest()[:16]
+
+
+def _parse_pub(s):
+    if not s:
+        return None
+    try:
+        return datetime.fromisoformat(s.replace("Z", "+00:00"))
+    except Exception:
+        return None
+
+
+def age_weight(published_at, now):
+    dt = _parse_pub(published_at)
+    if not dt:
+        return 0.5
+    hours = max(0.0, (now - dt.astimezone(timezone.utc)).total_seconds() / 3600)
+    return 0.5 ** (hours / 48)
+
+
+def build_news(entry, gdelt, yf_ticker=None, max_recent=8, gnews=None, store=None, now=None):
     """Return (news_block, gaps). yfinance headlines first (ticker-linked, no extra call); Google News RSS (free,
     unthrottled) when those are thin; GDELT only as a further fallback because it rate-limits hard."""
     gaps, items = [], []
@@ -214,8 +236,22 @@ def build_news(entry, gdelt, yf_ticker=None, max_recent=8, gnews=None):
         it["evidence_type"] = "headline_only"
     pos = sum(i["sentiment"] == "positive" for i in items)
     neg = sum(i["sentiment"] == "negative" for i in items)
+    now = now or datetime.now(timezone.utc)
+    wpos = wneg = 0.0
+    stale_pos = False
+    for it in items:
+        it["age_weight"] = round(age_weight(it.get("published_at"), now), 3)
+        it["fingerprint"] = fingerprint(it["title"])
+        hits = store.remember_headline(it["fingerprint"], now.isoformat()) if store is not None else 1
+        it["repeat_hits"] = hits
+        it["stale"] = hits > 1 and it["age_weight"] < 0.5
+        wpos += it["age_weight"] if it["sentiment"] == "positive" else 0
+        wneg += it["age_weight"] if it["sentiment"] == "negative" else 0
+        stale_pos = stale_pos or (it["stale"] and it["sentiment"] == "positive")
     block = {"total": len(items), "positive": pos, "negative": neg, "neutral": len(items) - pos - neg,
-             "tone_method": "headline_lexicon_v1 (heuristic; headline-only, not full-text)",
+             "weighted_positive": round(wpos, 3), "weighted_negative": round(wneg, 3),
+             "stale_positive": stale_pos,
+             "tone_method": "headline_lexicon_v1 (heuristic; headline-only, not full-text; age-weighted)",
              "recent": items[:max_recent]}
     if not items:
         gaps.append("news.items")

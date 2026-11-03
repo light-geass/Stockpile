@@ -1,5 +1,7 @@
 """Deterministic agents + judge. Pure Python, no LLM. Always available as the fallback engine.
 Bull and Bear each score 0-100 from fixed rules (weights sum to 100). Missing data earns no points."""
+import etf
+import ipo
 from grounding import fid
 
 
@@ -41,8 +43,9 @@ def score_bull(b, facts):
     if bp is not None and bp >= 80:
         add(10, f"{_fmt(bp)}% of analysts rate it a buy", "analyst.buy_pct")
     n = b.get("news") or {}
-    if n.get("positive", 0) > n.get("negative", 0):
-        add(10, f"Headline tone leans positive ({n['positive']} vs {n['negative']})", "news.positive")
+    pos, neg = news_tone(n)
+    if pos > neg:
+        add(10, f"Headline tone leans positive ({n.get('positive', 0)} vs {n.get('negative', 0)})", "news.positive")
     wr = _v(b, "technicals.window_return_pct")
     if wr is not None and wr > 0:
         add(5, f"Up {_fmt(wr)}% over about a month", "technicals.window_return_pct")
@@ -79,8 +82,9 @@ def score_bear(b, facts):
     if sp is not None and sp >= 20:
         add(10, f"{_fmt(sp)}% of analysts rate it a sell", "analyst.sell_pct")
     n = b.get("news") or {}
-    if n.get("negative", 0) > n.get("positive", 0):
-        add(10, f"Headline tone leans negative ({n['negative']} vs {n['positive']})", "news.negative")
+    pos, neg = news_tone(n)
+    if neg > pos:  # score_bear reads neg>pos; news_tone returns (positive, negative) for both scorers
+        add(10, f"Headline tone leans negative ({n.get('negative', 0)} vs {n.get('positive', 0)})", "news.negative")
     dr = _v(b, "technicals.day_range_position_pct")
     if dr is not None and dr < 30:
         add(5, f"Weak close in the day range ({_fmt(dr)}%)", "technicals.day_range_position_pct")
@@ -106,9 +110,77 @@ def sub_scores(b):
     return {"technicals": t, "fundamentals": f, "news": ns}
 
 
+def news_tone(n):
+    """(positive, negative) headline weight: age-weighted counts when present, raw counts otherwise.
+    A fresh headline outweighs one repeated all week — the stale-news reversal risk the plan targets."""
+    wpos, wneg = n.get("weighted_positive"), n.get("weighted_negative")
+    return (wpos, wneg) if wpos is not None and wneg is not None else (n.get("positive", 0), n.get("negative", 0))
+
+
 def leadership(b):
     pos, rv = _v(b, "range_52w.position_pct"), _v(b, "technicals.rvol")
     return (pos is not None and pos >= 60) or (rv is not None and rv >= 3)
+
+
+def apply_guards(j, b):
+    """Python-side caps. Flags are precomputed onto the bundle; this never fetches."""
+    notes = list(j.get("guards") or [])
+    if j.get("verdict") != "BUY":
+        j["guards"] = notes
+        return j
+    if not etf.allows_buy(b):
+        j["verdict"] = "WATCH"
+        notes.append("BUY downgraded: ETF overlay rejected equity-breakout rules")
+    if ipo.force_watch(b, b.get("sme_watch_until_checklist", True)):
+        j["verdict"] = "WATCH"
+        notes.append("BUY downgraded: IPO/SME checklist incomplete")
+    if (b.get("events") or {}).get("blocks_buy"):
+        j["verdict"] = "WATCH"
+        notes.append("BUY downgraded: scheduled event inside holding window")
+    if (b.get("regime") or {}).get("label") == "risk_off" and b.get("regime_guard", True):
+        j["verdict"] = "WATCH"
+        notes.append("BUY downgraded: risk-off index regime")
+    n, wr = b.get("news") or {}, (b.get("technicals") or {}).get("window_return_pct") or 0
+    if n.get("stale_positive") and wr > 5:
+        j["verdict"] = "WATCH"
+        notes.append("BUY downgraded: stale repeated positive news after a run-up")
+    if j["verdict"] != "BUY":
+        j["confidence"] = min(j.get("confidence") or 6, 6)
+    j["guards"] = notes
+    return j
+
+
+def evaluate_etf(b):
+    """ETFs are not stocks. Breakout/RVOL/52-week judgement rules describe a single company's momentum and
+    mean something different (or nothing) for a basket, so an ETF is judged on what actually decides its return:
+    tracking error, liquidity, and premium/discount to NAV. Missing data is a gap and caps the verdict at WATCH."""
+    e = b.get("etf") or {}
+    why, ok = [], True
+    prem, td, adv = e.get("premium_pct"), e.get("tracking_diff_20d"), e.get("adv")
+    if prem is not None:
+        why.append(f"Premium/discount to NAV {prem:+.2f}%" + (" (expensive to buy)" if abs(prem) > 1.5 else ""))
+        ok &= abs(prem) <= 1.5
+    if td is not None:
+        why.append(f"20-day tracking difference {td:+.2f}%")
+        ok &= abs(td) <= 3
+    if adv is not None:
+        why.append(f"Average daily volume {adv:,.0f}")
+        ok &= adv >= 50_000
+    if e.get("expense_ratio") is not None:
+        why.append(f"Expense ratio {e['expense_ratio']}")
+    gaps = [g for g in (e.get("gaps") or [])]
+    verdict = "WATCH" if gaps else ("BUY" if ok else "AVOID")
+    notes = ["ETF judged on tracking, liquidity and NAV premium, not equity breakout rules"]
+    if gaps:
+        notes.append("ETF overlay incomplete: " + ", ".join(gaps))
+    j = {"winner": "ETF overlay", "verdict": verdict, "confidence": 6 if verdict == "WATCH" else 8 if ok else 3,
+         "net": 0, "rationale": ("; ".join(why) or "No ETF overlay data available") + ".",
+         "key_catalyst": why[0] if why else "No ETF overlay data in the feed",
+         "bull_score": None, "bear_score": None, "evidence": [], "guards": notes}
+    return {"scores": {"bull": {"score": None, "reasons": []}, "bear": {"score": None, "reasons": []},
+                       "technicals": {"score": None}, "fundamentals": {"score": None}, "news": {"score": None}},
+            "verdict": j, "engine": "deterministic_etf", "model": None, "fallback_reason": None,
+            "validation": {"passed": True, "issues": [], "guards": notes}, "news_interpretation": None}
 
 
 def judge(bull, bear, b):
@@ -116,10 +188,12 @@ def judge(bull, bear, b):
     verdict = "BUY" if (net >= 25 and leadership(b)) else "AVOID" if net <= -15 else "WATCH"
     conf = max(1, min(10, round(4 + net / 15)))
     conf = max(conf, 7) if verdict == "BUY" else min(conf, 6)
-    return {"winner": "Bull" if net > 0 else "Bear", "verdict": verdict, "confidence": conf, "net": net}
+    return apply_guards({"winner": "Bull" if net > 0 else "Bear", "verdict": verdict, "confidence": conf, "net": net}, b)
 
 
 def evaluate_deterministic(b, facts):
+    if (b.get("asset_type") or "").upper() == "ETF":
+        return evaluate_etf(b)
     bs, bw = score_bull(b, facts)
     es, ew = score_bear(b, facts)
     j = judge(bs, es, b)

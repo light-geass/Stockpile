@@ -1,4 +1,4 @@
-﻿"""Watchlist store, API and run scope. No database is contacted: the store is faked (API/pipeline) or the
+"""Watchlist store, API and run scope. No database is contacted: the store is faked (API/pipeline) or the
 SQL layer is replaced with an in-memory cursor that records statements (store)."""
 import re
 import time
@@ -8,7 +8,7 @@ import pytest
 import instrument_search
 from tests.conftest import LOCAL, FakeHTTP
 from tests.test_instrument_search import MASTER
-from tests.test_pipeline import FakeProvider, FakeGdelt, FakeYF, FakeTG
+from tests.test_pipeline import FakeProvider, FakeGdelt, FakeGNews, FakeYF, FakeTG
 from watchlists import WatchlistError, WatchlistStore, dsn_uri
 
 
@@ -25,7 +25,7 @@ def hdr(tok, **extra):
 def api(mk):
     cat = instrument_search.InstrumentCatalogue(http=FakeHTTP(), records=instrument_search.parse_master(MASTER))
     app, _ = mk({"FYERS_APP_ID": "A-1", "FYERS_APP_SECRET": "s", "FYERS_ACCESS_TOKEN": "env-token-1234567"},
-                {"catalogue": cat, "fyers": FakeProvider(), "gdelt": FakeGdelt(), "yf": FakeYF, "telegram": FakeTG()})
+                {"catalogue": cat, "fyers": FakeProvider(), "gdelt": FakeGdelt(), "gnews": FakeGNews(), "yf": FakeYF, "telegram": FakeTG()})
     return app, app.test_client(), app.extensions["watchlists"]
 
 
@@ -204,7 +204,7 @@ def _cat():
 
 
 def test_run_analyses_only_the_selected_watchlist(mk):
-    deps = {"catalogue": _cat(), "fyers": FakeProvider(), "gdelt": FakeGdelt(), "yf": FakeYF, "telegram": FakeTG()}
+    deps = {"catalogue": _cat(), "fyers": FakeProvider(), "gdelt": FakeGdelt(), "gnews": FakeGNews(), "yf": FakeYF, "telegram": FakeTG()}
     app, _ = mk({"FYERS_APP_ID": "A-1", "FYERS_APP_SECRET": "s", "FYERS_ACCESS_TOKEN": "env-token-1234567"}, deps)
     store = app.extensions["watchlists"]
     store.create("Pairs")
@@ -220,7 +220,7 @@ def test_run_analyses_only_the_selected_watchlist(mk):
 
 
 def test_run_without_an_id_uses_the_first_list_only(mk):
-    deps = {"catalogue": _cat(), "fyers": FakeProvider(), "gdelt": FakeGdelt(), "yf": FakeYF, "telegram": FakeTG()}
+    deps = {"catalogue": _cat(), "fyers": FakeProvider(), "gdelt": FakeGdelt(), "gnews": FakeGNews(), "yf": FakeYF, "telegram": FakeTG()}
     app, _ = mk({"FYERS_APP_ID": "A-1", "FYERS_APP_SECRET": "s", "FYERS_ACCESS_TOKEN": "env-token-1234567"}, deps)
     app.extensions["pipeline"].run("live")
     st = app.extensions["pipeline"].snapshot()
@@ -228,7 +228,7 @@ def test_run_without_an_id_uses_the_first_list_only(mk):
 
 
 def test_empty_or_unknown_list_fails_visibly_and_never_falls_back(mk):
-    deps = {"catalogue": _cat(), "fyers": FakeProvider(), "gdelt": FakeGdelt(), "yf": FakeYF, "telegram": FakeTG()}
+    deps = {"catalogue": _cat(), "fyers": FakeProvider(), "gdelt": FakeGdelt(), "gnews": FakeGNews(), "yf": FakeYF, "telegram": FakeTG()}
     app, _ = mk({"FYERS_APP_ID": "A-1", "FYERS_APP_SECRET": "s", "FYERS_ACCESS_TOKEN": "env-token-1234567"}, deps)
     p = app.extensions["pipeline"]
     p.run("live", watchlist_id=99)
@@ -243,7 +243,7 @@ def test_empty_list_is_refused_before_any_fyers_call(mk):
         def quotes(self, syms):
             calls.append(list(syms))
             return super().quotes(syms)
-    deps = {"catalogue": _cat(), "fyers": Spy(), "gdelt": FakeGdelt(), "yf": FakeYF, "telegram": FakeTG()}
+    deps = {"catalogue": _cat(), "fyers": Spy(), "gdelt": FakeGdelt(), "gnews": FakeGNews(), "yf": FakeYF, "telegram": FakeTG()}
     app, _ = mk({"FYERS_APP_ID": "A-1", "FYERS_APP_SECRET": "s", "FYERS_ACCESS_TOKEN": "env-token-1234567"}, deps)
     app.extensions["watchlists"].create("Empty")
     p = app.extensions["pipeline"]
@@ -253,7 +253,7 @@ def test_empty_list_is_refused_before_any_fyers_call(mk):
 
 
 def test_api_start_requires_a_watchlist_and_resolves_it_server_side(mk):
-    deps = {"catalogue": _cat(), "fyers": FakeProvider(), "gdelt": FakeGdelt(), "yf": FakeYF, "telegram": FakeTG()}
+    deps = {"catalogue": _cat(), "fyers": FakeProvider(), "gdelt": FakeGdelt(), "gnews": FakeGNews(), "yf": FakeYF, "telegram": FakeTG()}
     app, _ = mk({"FYERS_APP_ID": "A-1", "FYERS_APP_SECRET": "s", "FYERS_ACCESS_TOKEN": "env-token-1234567"}, deps)
     app.extensions["watchlists"].create("Two")
     c = app.test_client()

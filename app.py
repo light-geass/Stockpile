@@ -10,6 +10,7 @@ import os
 import secrets
 import threading
 import time
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from flask import Flask, Response, abort, jsonify, redirect, request, session, url_for
@@ -17,7 +18,11 @@ from flask.sessions import SecureCookieSessionInterface
 from markupsafe import escape
 
 import config
+import evidence as ev
+import outcomes
+import predict
 from fyers_auth import AuthError, FyersAuth, TokenStore
+from fyers_client import FyersClient, RateLimiter
 from instrument_search import (CatalogueError, InstrumentCatalogue, MAX_QUERY as SEARCH_MAX_QUERY,
                                MIN_QUERY as SEARCH_MIN_QUERY)
 from pipeline import Pipeline
@@ -322,6 +327,70 @@ def create_app(settings=None, deps=None, store_path=None):
         brief = {k: instrument.get(k) for k in ("symbol", "name", "exchange", "asset_type", "provider_symbol")}
         return jsonify(started=True, mode="live", scope="focused", target=brief), 202
 
+    # ---------------- accuracy (Phase 1) ----------------
+    @app.get("/api/accuracy")
+    def api_accuracy():
+        return jsonify(outcomes.accuracy_report(store, s.horizons, s.benchmark_symbol))
+
+    @app.get("/api/replay")
+    def api_replay():
+        """Bootstrap a baseline backtest from history instead of waiting weeks of live runs.
+        Technical features only, and the universe is today's symbol master — both stated in the payload."""
+        ref = (request.args.get("provider_symbol") or "").strip()
+        if not ref or len(ref) > 60:
+            return jsonify(error="bad_instrument", message="Pass ?provider_symbol=NSE:TCS-EQ."), 400
+        if not auth.get_token() and not (deps or {}).get("fyers"):
+            return jsonify(error="not_connected", message="Connect FYERS first: replay needs price history."), 400
+        provider = (deps or {}).get("fyers") or FyersClient(
+            s.fyers_app_id, auth.get_token, RateLimiter(per_minute=s.fyers_per_minute_cap, per_day=s.fyers_daily_cap))
+        try:
+            candles = provider.daily_candles(ref, days=366)
+        except Exception as e:
+            log.warning("replay fetch failed: %s", redact(str(e), s.secret_values()))
+            return jsonify(error="replay_failed", message="Price history is unavailable right now."), 502
+        symbol = ref.split(":")[-1].replace("-EQ", "").replace("-BE", "")
+        return jsonify(outcomes.replay_report(candles, symbol, s.horizons))
+
+    @app.post("/api/outcomes/settle")
+    def api_settle():
+        """On-demand settle with the same CSRF/session gating as every other POST. Never invents a fill: a
+        provider failure is reported per verdict, and the nightly job retries idempotently."""
+        if not auth.get_token() and not (deps or {}).get("fyers"):
+            return jsonify(error="not_connected", message="Connect FYERS first: settlement needs price history."), 400
+        provider = (deps or {}).get("fyers")
+        if provider is None:
+            provider = FyersClient(s.fyers_app_id, auth.get_token,
+                                   RateLimiter(per_minute=s.fyers_per_minute_cap, per_day=s.fyers_daily_cap))
+        try:
+            stats = outcomes.settle_pending(store, provider, s.horizons, s.benchmark_symbol,
+                                            holidays=ev.holiday_state()["dates"])
+        except Exception as e:
+            log.warning("settle job failed: %s", redact(str(e), s.secret_values()))
+            return jsonify(error="settle_failed", message="Settlement stopped early. The next run resumes safely."), 502
+        return jsonify(ok=True, settled=stats["settled"], skipped=stats["skipped"], errors=len(stats["errors"]))
+
+    @app.post("/api/model/retrain")
+    def api_retrain():
+        """Phase 3 on demand: run the weekly trainer now instead of waiting for the scheduler.
+
+        Ships nothing unless a horizon clears the ship gate (OOS Brier better than the base rate on the same
+        folds, no feature drift, >= MIN_TRAIN rows). Every trial is ledgered whether it ships or not, so a
+        manual retrain can never hide an overfit week. With MODEL_ENABLED=false the ledger is still written —
+        that is the honest experiment record the roadmap asks for."""
+        try:
+            result = predict.train_all(store, s.horizons)
+            store.kv_set("model_trained_at", datetime.now(ev.IST).isoformat())
+        except Exception as e:
+            log.warning("manual retrain failed: %s", redact(str(e), s.secret_values()))
+            return jsonify(error="retrain_failed", message="Training stopped early. Check the server log."), 500
+        shipped = {h: m for h, m in result.items() if m.get("shipped")}
+        return jsonify(ok=True, model_enabled=bool(s.model_enabled), trained={str(h): {
+            "n": m.get("n"), "shipped": bool(m.get("shipped")), "brier": m.get("brier"),
+            "baseline_brier": m.get("baseline_brier"), "base_rate": m.get("base_rate"),
+            "drift": m.get("drift"), "notes": m.get("notes")} for h, m in result.items()},
+            published=[str(h) for h in shipped] if s.model_enabled else [],
+            note="" if s.model_enabled else "MODEL_ENABLED=false: trials were ledgered but no model is published.")
+
     # ---------------- FYERS OAuth ----------------
     def err_page(title, detail, code=400):
         request._nonce = ""
@@ -378,7 +447,68 @@ def create_app(settings=None, deps=None, store_path=None):
     def err(e):
         return jsonify(error="request_rejected", message=str(getattr(e, "description", "Rejected"))), e.code
 
+    _schedule_nightly_settle(app, deps)
+    if s.model_enabled:
+        # Train once at startup if the ledger is empty or stale, so a shipped model is available on first run.
+        threading.Thread(target=retrain_if_due, args=(app, store, s), daemon=True, name="model-warmup").start()
     return app
+
+
+def _schedule_nightly_settle(app, deps):
+    """One settle pass per day after `settle_hour_ist` (default 19:00). A single process runs the pipeline thread,
+    so this is a daemon timer, not a scheduler service; a missed night is recovered because settling is idempotent."""
+    if app.config.get("TESTING") or os.environ.get("DISABLE_SETTLE_JOB"):
+        return
+    s, store = app.config["SETTINGS"], app.extensions["store"]
+
+    def next_due(now):
+        due = now.replace(hour=s.settle_hour_ist % 24, minute=0, second=0, microsecond=0)
+        return due if due > now else due + timedelta(days=1)
+
+    def loop():
+        while True:
+            time.sleep(max(60.0, (next_due(datetime.now(ev.IST)) - datetime.now(ev.IST)).total_seconds()))
+            try:
+                provider = (deps or {}).get("fyers") or FyersClient(
+                    s.fyers_app_id, app.extensions["auth"].get_token,
+                    RateLimiter(per_minute=s.fyers_per_minute_cap, per_day=s.fyers_daily_cap))
+                stats = outcomes.settle_pending(store, provider, s.horizons, s.benchmark_symbol,
+                                                holidays=ev.holiday_state()["dates"])
+                log.info("nightly settle: %s settled, %s skipped, %s errors",
+                         stats["settled"], stats["skipped"], len(stats["errors"]))
+            except Exception as e:  # a data outage must never kill the scheduler
+                log.warning("nightly settle failed: %s", redact(str(e), s.secret_values()))
+            retrain_if_due(app, store, s)
+
+    threading.Thread(target=loop, daemon=True, name="settle-nightly").start()
+
+
+def retrain_if_due(app, store, s, now=None):
+    """Weekly retrain, only when MODEL_ENABLED. Every trial lands in the experiment ledger whether it ships or
+    not, so an overfitted week stays visible instead of silently replacing a working model."""
+    if not getattr(s, "model_enabled", False):
+        return None
+    now = now or datetime.now(ev.IST)
+    last = store.kv_get("model_trained_at") or ""
+    try:
+        last_dt = datetime.fromisoformat(last).astimezone(ev.IST)
+    except (AttributeError, ValueError):
+        last_dt = None
+    if last_dt and (now - last_dt).days < 7:
+        return None
+    try:
+        import predict
+        result = predict.train_all(store, s.horizons)
+        store.kv_set("model_trained_at", now.isoformat())
+        shipped = [h for h, m in result.items() if m.get("shipped")]
+        log.info("weekly retrain: shipped horizons %s", shipped or "none (base rate only)")
+        for h, m in result.items():
+            if m.get("notes"):
+                log.info("horizon %sd: %s", h, "; ".join(m["notes"]))
+        return result
+    except Exception as e:  # a bad week must never take the server down
+        log.warning("weekly retrain failed: %s", redact(str(e), s.secret_values()))
+        return None
 
 
 def main():

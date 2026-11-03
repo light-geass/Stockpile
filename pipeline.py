@@ -7,13 +7,22 @@ from datetime import datetime, timezone
 
 import data_sources as ds
 import chart_patterns as cp
+import etf
+import events
 import evidence as ev
+import ipo
 import llm
 import news as newsmod
+import playbook
+import predict
+import regime
 from fyers_client import FyersClient, FyersError
 from grounding import build_facts
 from notifier import Telegram, format_buy, format_summary
+import outcomes
+from outcomes import DISCLAIMER
 from security import redact
+from sizing import guidance
 from storage import Store
 from watchlists import WatchlistError
 
@@ -41,7 +50,8 @@ class Pipeline:
         self.deps, self.watchlists = deps or {}, watchlists
         self.lock = threading.Lock()
         self.running = False
-        self._yf_map = {}
+        self._yf = {}  # symbol → {ticker, info}: the one yfinance fetch reused by analyst, events, ETF and IPO
+        self._ranges = None
         self._reset()
 
     # ---------- state ----------
@@ -50,7 +60,8 @@ class Pipeline:
                       "message": "Ready. Press Run analysis to start.",
                       "agents": {k: {"name": n, "role": r, "status": "offline", "stats": {}} for k, n, r in AGENTS},
                       "kpis": {"universe": 0, "in_debate": 0, "buys": 0, "top_pick": None},
-                      "verdicts": [], "warnings": [], "footer": None, "engine": None, "pulled_at": None}
+                      "verdicts": [], "warnings": [], "footer": None, "engine": None, "pulled_at": None,
+                      "playbook": None, "disclaimer": DISCLAIMER}
 
     def snapshot(self):
         with self.lock:
@@ -122,17 +133,25 @@ class Pipeline:
             self.running = True
             self.state.update(status="running", mode="live", message="Run started.")
         run_id = self.store.start_run(scope)
+        self._bench = None  # per-run memo, reset before the first provider request
+        self._ranges = None
         engine_label, uni_n, short_n, summary = None, 0, 0, {}
         try:
+            ev.load_holidays((self.deps or {}).get("http"), self.store)
             bundles, uni_n = self._collect_focused(target) if focused else self._collect_live(wl)
             short_n = len(bundles)
+            self._enrich(bundles, self._daily)
             self._debate(bundles, run_id)
+            scored = self._scored(bundles)  # the benchmark bundle is a reference row, never a decision
+            self._set(playbook=playbook.build(scored, self.results, self.s, ev.now_ist()))
             if focused:
-                self._record_focused(bundles, run_id)
+                self._record_focused(scored, run_id)
             else:
-                self._message(bundles, run_id)
+                self._message(scored, run_id)
             engine_label = self.state["engine"]
-            self._finish(bundles, uni_n)
+            self._finish(scored, uni_n)
+            # Last on purpose: a provider hiccup on the reference row must not fail a completed run.
+            self._record_benchmark([b for b in bundles if b.get("benchmark")], run_id)
             self._set(status="done", message="Focused analysis complete." if focused else "Run complete.")
         except RunAbort as e:
             with self.lock:
@@ -239,16 +258,21 @@ class Pipeline:
         self._agent("fundamentalist", "done", covered=f"{cov}/{len(entries)}",
                     **{"avg upside": f"{sum(ups) / len(ups):+.1f}%" if ups else "n/a"},
                     **({"note": f"{nocov} without analyst coverage"} if nocov else {}))
-        self._yf_map = yf_map
+        self._yf = {e["symbol"]: {"ticker": t, "info": meta or {}} for e in entries
+                    for _a, meta, _g, t in [out[e["symbol"]]]}
         return out
 
     def _news(self, entries, fundamentals):
         self._agent("newsdesk", "working")
         gd = self.deps.get("gdelt") or newsmod.Gdelt(self.s.gdelt_min_interval)
         gn = self.deps.get("gnews", newsmod.google_news)
-        out = {e["symbol"]: newsmod.build_news(e, gd, fundamentals[e["symbol"]][3], gnews=gn) for e in entries}
+        # store= lets build_news fingerprint headlines across runs; without it the stale-news flag is dead code.
+        out = {e["symbol"]: newsmod.build_news(e, gd, fundamentals[e["symbol"]][3], gnews=gn, store=self.store)
+               for e in entries}
+        stale = sum(1 for n in out.values() if n[0].get("stale_positive"))
         self._agent("newsdesk", "done", headlines=sum(n[0]["total"] for n in out.values()),
-                    tone=f"{sum(n[0]['positive'] for n in out.values())}+ / {sum(n[0]['negative'] for n in out.values())}-")
+                    tone=f"{sum(n[0]['positive'] for n in out.values())}+ / {sum(n[0]['negative'] for n in out.values())}-",
+                    **({"stale positive": stale} if stale else {}))
         return out
 
     def _warn_market(self, session, bundles):
@@ -257,8 +281,8 @@ class Pipeline:
             ages = sorted(b["quote_age_sec"] for b in bundles if b.get("quote_age_sec") is not None)
             self._warn(f"{len(stale)} quotes are older than {self.s.quote_max_age_sec}s while the market is scheduled open "
                        f"(median age {ages[len(ages)//2] if ages else '?'}s). Check your PC clock sync; alerts are blocked for stale quotes.")
-        if session != "open":
-            self._warn("Market is closed (scheduled NSE hours; holidays not modelled): data is last-session, so no alerts fire.")
+        for w in ev.session_warnings(session):
+            self._warn(w)
 
     def _collect_live(self, wl):
         """Scan exactly the selected watchlist (resolved from the DB by the server, never from the browser)."""
@@ -269,6 +293,8 @@ class Pipeline:
         self._agent("scout", "working")
         quotes = self._fyers_call(provider.quotes, [e["fyers"] for e in entries])
         short = ds.screen_watchlist(entries, quotes, self.s.shortlist_per_bucket)
+        for e in short:
+            e["screened_as"] = "top_gainer"
         retrieved = datetime.now(timezone.utc)
         self._agent("scout", "done", scanned=len(quotes), shortlisted=len(short))
         self._set(pulled_at=ev.now_ist().strftime("%d %b %Y, %H:%M IST"),
@@ -282,9 +308,12 @@ class Pipeline:
         chart = self._chart(short, tech, quotes, session)
         fund = self._fundamentals(short, quotes)
         nws = self._news(short, fund)
+        # One candle fetch per symbol (line 4 of the tuple) is reused by the Chart Analyst, IPO overlay and settle job.
+        self._daily = {e["symbol"]: tech[e["symbol"]][3] for e in short if tech[e["symbol"]] is not None}
         bundles = [self._bundle(e, quotes[e["fyers"]], tech[e["symbol"]], chart[e["symbol"]],
-                                fund[e["symbol"]], nws[e["symbol"]], self._yf_map[e["symbol"]], retrieved, session)
+                                fund[e["symbol"]], nws[e["symbol"]], self._ticker(e), retrieved, session)
                    for e in short]
+        bundles += self._benchmark_bundles(retrieved, session)  # reference row for excess returns
         self._warn_market(session, bundles)
         return bundles, len(entries)
 
@@ -299,7 +328,7 @@ class Pipeline:
         entry = {"symbol": target["symbol"], "name": target.get("name") or target["symbol"], "sector": None,
                  "cap_segment": "Selected", "asset_type": target.get("asset_type"),
                  "fyers": (q or {}).get("symbol") or target["provider_symbol"],
-                 "news_query": target.get("name") or target["symbol"]}
+                 "news_query": target.get("name") or target["symbol"], "screened_as": "selected"}
         quotes = {entry["fyers"]: q or {}}
         if not q or q.get("live") is None:
             self._agent("scout", "error")
@@ -312,13 +341,62 @@ class Pipeline:
         chart = self._chart([entry], tech, quotes, session)
         fund = self._fundamentals([entry], quotes)
         nws = self._news([entry], fund)
+        self._daily = {entry["symbol"]: tech[entry["symbol"]][3] if tech[entry["symbol"]] is not None else None}
         bundle = self._bundle(entry, q, tech[entry["symbol"]], chart[entry["symbol"]],
-                              fund[entry["symbol"]], nws[entry["symbol"]], self._yf_map[entry["symbol"]],
-                              retrieved, session)
+                              fund[entry["symbol"]], nws[entry["symbol"]], self._ticker(entry), retrieved, session)
         self._warn_market(session, [bundle])
-        if self._yf_map[entry["symbol"]] is None:
+        if self._ticker(entry) is None:
             self._warn("No verified yfinance listing for this instrument: analyst data is reported as a gap, not guessed.")
         return [bundle], 1
+
+    @staticmethod
+    def _scored(bundles):
+        """Verdict rows only: the benchmark reference row is recorded but never debated or alerted."""
+        return [b for b in bundles if not b.get("benchmark")]
+
+    def _record_benchmark(self, bundles, run_id):
+        """Persist the benchmark's close so settle_pending() can compute a same-horizon reference return."""
+        result = {"engine": "benchmark", "scores3": None,
+                  "verdict": {"verdict": "BENCHMARK", "confidence": 0}, "fallback_reason": None}
+        alert = {"eligible": False, "blocked_reasons": ["benchmark reference row; never scored or alerted"]}
+        for b in bundles:
+            self.store.add_verdict(run_id, b, result, alert)
+
+    def _ticker(self, entry):
+        return (self._yf.get(entry["symbol"]) or {}).get("ticker")
+
+    def _benchmark_candles(self):
+        """One request per run, shared by the regime, the ETF tracking check and the reference row."""
+        if getattr(self, "_bench", None) is None:
+            try:
+                self._bench = self._fyers_call(self._fyers().daily_candles, f"NSE:{self.s.benchmark_symbol}-EQ") or []
+            except Exception as e:
+                self._warn(f"Index regime unavailable ({type(e).__name__}); regime facts are a gap.")
+                self._bench = []
+        return self._bench
+
+    def _benchmark_bundles(self, retrieved, session):
+        """Record the benchmark's close as a close-only verdict, so Phase-1 accuracy has a same-horizon reference
+        (excess return) without a second data source. Never screened, scored or alerted; skipped if already held."""
+        symbol = self.s.benchmark_symbol
+        if any(symbol in (wl or {}).values() for wl in (getattr(self, "bundles", None) or {}).values()):
+            return []  # the user already analysed it: its own verdict is the reference row
+        try:
+            daily = self._benchmark_candles()
+            if not daily:
+                return []
+            # No live quote exists for this reference row, so its price is the last completed close.
+            quote = {"live": daily[-1].get("c"), "day_high": daily[-1].get("h"), "day_low": daily[-1].get("l"),
+                     "volume": daily[-1].get("v"), "prev_close": daily[-2].get("c") if len(daily) > 1 else None}
+            tech, rng, gaps = ev.technicals_from_daily(daily, quote, None, "closed")
+            b = ev.assemble_bundle({"symbol": symbol, "name": f"{symbol} (benchmark)", "asset_type": "ETF",
+                                    "screened_as": "benchmark"}, quote, tech, rng, ev.empty_analyst("benchmark"),
+                                   {"total": 0, "positive": 0, "negative": 0, "neutral": 0, "recent": []},
+                                   {"price": "fyers", "candles": "fyers"}, retrieved,
+                                   gaps + ["analyst.benchmark"], session="closed")
+            return [{**b, "benchmark": True}]
+        except Exception:
+            return []
 
     def _bundle(self, entry, quote, tech, chart, fund, news_block, yf_sym, retrieved, session):
         """Assemble one evidence bundle; a failed Technician slot degrades to explicit nulls, never an exception.
@@ -326,7 +404,9 @@ class Pipeline:
         t, rng, tg = tech[:3]
         if t is None:
             t = {"rvol": None, "rvol_method": None, "price_vs_sma_pct": None, "sma_period": 10, "window_return_pct": None,
-                 "swing_high": None, "swing_low": None, "day_range_position_pct": None, "trend": None}
+                 "swing_high": None, "swing_low": None, "day_range_position_pct": None, "trend": None,
+                 "atr14_pct": None, "overnight_gap_median_pct": None, "overnight_gap_p5_pct": None,
+                 "stop_level": None, "entry_zone": None}
             rng = {"high": None, "low": None, "pct_from_high": None, "position_pct": None, "basis": "unavailable"}
         ch, cg = chart
         an, _meta, fg, _ticker = fund
@@ -336,9 +416,50 @@ class Pipeline:
         bundle = ev.assemble_bundle(entry, quote, t, rng, an, nb, src, retrieved,
                                    list(tg or []) + list(cg or []) + list(fg) + list(ng),
                                    max_age=self.s.quote_max_age_sec, session=session)
+        bundle["is_benchmark"] = bool(entry.get("screened_as") == "benchmark")
         if ch:
             bundle["chart"] = ch
+        ev.attach_risk(bundle)
         return bundle
+
+    def _enrich(self, bundles, daily=None):
+        """Forward-looking overlay: events, regime, ETF/IPO, optional calibrated probabilities.
+        One benchmark candle request feeds both the regime and the ETF tracking check; the yfinance handles
+        already fetched for the analyst panel feed the event calendar and the ETF/IPO metadata (no second fetch).
+        `daily` is the Technician's candle cache (symbol → candles) so the IPO listing age needs no new request."""
+        http = self.deps.get("http")
+        bench = self._benchmark_candles()
+        reg = regime.from_candles(bench)
+        trained = {}
+        if self.s.model_enabled:
+            try:
+                trained = {m["horizon"]: m for m in self.store.shipped_models()}
+            except Exception:
+                trained = {}
+        through = ev.now_ist().date().isoformat()
+        for b in bundles:
+            yf = self._yf.get(b["symbol"]) or {}
+            items, gaps = events.collect(b["symbol"], yf.get("ticker"), http)
+            blocked, nxt = events.blocks_buy(items, self.s.event_guard_days)
+            nxt = nxt or (items[0] if items else None)
+            b["events"] = {"items": items, "blocks_buy": blocked, "next_date": (nxt or {}).get("date")}
+            b["regime"], b["regime_guard"] = reg, self.s.regime_guard
+            b["sme_watch_until_checklist"] = self.s.sme_watch_until_checklist
+            asset = (b.get("asset_type") or "EQUITY").upper()
+            extra = []
+            if asset == "ETF":
+                b["etf"] = etf.profile(b, bench, yf.get("info"))
+                extra = b["etf"]["gaps"]
+            else:
+                # Catalogue never labels IPO; listing age comes from the Technician's candles.
+                p = ipo.profile(b, (daily or {}).get(b["symbol"]), info=yf.get("info"))
+                if p.get("recent_ipo") or p.get("sme"):
+                    b["ipo"] = p
+                    extra = p["gaps"]
+            if reg.get("vix_gap"):
+                extra.append("regime.vix")
+            b["data_gaps"] = sorted(set(b.get("data_gaps") or []) | set(gaps) | set(extra))
+            predict.attach(b, trained, through)
 
     def _record_focused(self, bundles, run_id):
         """Persist the verdict for the audit trail. Focused runs never send Telegram in v1."""
@@ -376,12 +497,14 @@ class Pipeline:
         n_groq = sum(r["engine"] == "groq" for r in results.values())
         engine = ("deterministic" if n_groq == 0 else f"groq:{self.s.groq_model}" if n_groq == len(results)
                   else f"mixed ({n_groq} LLM / {len(results) - n_groq} deterministic)")
-        bs = [r["verdict"]["bull_score"] for r in results.values()]
-        es = [r["verdict"]["bear_score"] for r in results.values()]
+        # ETF rows carry no bull/bear score by design (they are judged on their overlay), so average only
+        # rows that actually produced a number.
+        bs = [s for r in results.values() if (s := r["verdict"].get("bull_score")) is not None]
+        es = [s for r in results.values() if (s := r["verdict"].get("bear_score")) is not None]
         buys = sum(r["verdict"]["verdict"] == "BUY" for r in results.values())
         self._set(engine=engine)
-        self._agent("bull", "done", cases=len(bs), **{"avg score": round(sum(bs) / len(bs))}); self._pause()
-        self._agent("bear", "done", cases=len(es), **{"avg score": round(sum(es) / len(es))}); self._pause()
+        self._agent("bull", "done", cases=len(bs), **{"avg score": round(sum(bs) / len(bs)) if bs else "n/a"}); self._pause()
+        self._agent("bear", "done", cases=len(es), **{"avg score": round(sum(es) / len(es)) if es else "n/a"}); self._pause()
         self._agent("judge", "done", verdicts=len(results), buys=buys)
         self.bundles = {b["symbol"]: b for b in bundles}
 
@@ -432,6 +555,7 @@ class Pipeline:
                 "fallback": r.get("fallback_reason"), "freshness": b["freshness"], "quote_age": b.get("quote_age_sec"), "synthetic": False,
                 "gaps": b["data_gaps"], "alert": {"status": status, "reason": reason},
                 "guards": r["validation"].get("guards", []),
+                "future": self._future(b, r),
                 "detail": {"scores": {k: {"score": s.get("score"), "point": s.get("point"),
                                          "reasons": [x["text"] for x in s.get("reasons", [])]} for k, s in r["scores"].items()},
                            "scores3": r.get("scores3"), "chart": b.get("chart"),
@@ -444,10 +568,29 @@ class Pipeline:
                            "analyst_reason": b["analyst"].get("_reason"),
                            "range_52w": b["range_52w"], "limitation": b["analyst"].get("limitation")}}
 
+    def _future(self, b, r=None):
+        """What is knowable about the future: probabilities (never a promise), calendar, regime, risk levels."""
+        t, ev_block = b.get("technicals") or {}, b.get("events") or {}
+        v = (r or {}).get("verdict") or {}
+        return {"prediction": b.get("prediction"), "events": (ev_block.get("items") or [])[:5],
+                "next_event": ev_block.get("next_date"), "regime": b.get("regime"),
+                "entry_zone": t.get("entry_zone"), "stop": t.get("stop_level"),
+                "sizing": guidance(b["price"].get("live"), t.get("stop_level"), self.s.risk_budget_inr),
+                "expected_range": outcomes.lookup_range(self._range_table(), v.get("verdict"), v.get("confidence"),
+                                                        r.get("engine") if r else None, self.s.horizons),
+                "etf": b.get("etf"), "ipo": b.get("ipo")}
+
+    def _range_table(self):
+        if self._ranges is None:
+            self._ranges = outcomes.range_table(self.store, self.s.horizons)
+        return self._ranges
+
     def _finish(self, bundles, uni_n):
         rows = self.state["verdicts"]
         buys = [r for r in rows if r["verdict"] == "BUY"]
-        top = max(rows, key=lambda r: (r["verdict"] == "BUY", r["confidence"], r["bull"] - r["bear"])) if rows else None
+        # ETF rows have no bull/bear scores; treat a missing score as 0 so the sort never compares None.
+        top = max(rows, key=lambda r: (r["verdict"] == "BUY", r["confidence"],
+                                       (r.get("bull") or 0) - (r.get("bear") or 0))) if rows else None
         focused = self.state["scope"] == "focused"
         wl = self.state.get("watchlist") or {}
         text = (f"Focused analysis of {bundles[0]['symbol']} (selected, not from a watchlist)" if focused

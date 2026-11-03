@@ -9,7 +9,7 @@ import time
 import requests
 
 from grounding import build_facts, verify_statement
-from scoring import evaluate_deterministic, leadership, scores3, sub_scores
+from scoring import apply_guards, evaluate_deterministic, leadership, scores3, sub_scores
 from security import redact
 
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
@@ -224,6 +224,8 @@ def _from_llm(o, b, ref, model):
             j["verdict"] = "WATCH"
             notes.append("BUY downgraded: no momentum/range confirmation")
     j.update(bull_score=bull, bear_score=bear, net=bull - bear)
+    j = apply_guards(j, b)
+    notes += [g for g in (j.get("guards") or []) if g not in notes]
     scores = {k: {"score": o["agents"][k]["score"], "point": o["agents"][k]["point"],
                   "evidence": o["agents"][k]["evidence"]} for k in AGENTS}
     if not (b.get("news") or {}).get("total"):
@@ -239,6 +241,11 @@ def evaluate(bundle, settings, client=None):
     ref = evaluate_deterministic(bundle, facts)
     s3 = scores3(bundle)
     ref["scores3"] = s3
+    if (bundle.get("asset_type") or "").upper() == "ETF":
+        # Decided by Python, not the model: an ETF is judged on tracking/liquidity/NAV premium, and the equity
+        # breakout rules the panel argues would systematically over-rate a basket. No LLM call is needed.
+        ref["fallback_reason"] = "etf_overlay"
+        return ref
     if client is None:
         ref["fallback_reason"] = "no_api_key"
         return ref
@@ -287,6 +294,10 @@ def alert_eligibility(bundle, result, settings):
         blocked.append("quote is stale")
     if bundle.get("freshness") in ("unknown",):
         blocked.append("quote timestamp unknown")
-    if settings.alert_require_open_market and bundle.get("market_session") != "open":
+    if settings.alert_require_open_market and bundle.get("market_session") not in ("open", "cas"):
         blocked.append("market closed (data is last-session, not live)")
+    if (bundle.get("events") or {}).get("blocks_buy"):
+        blocked.append("scheduled event inside holding window")
+    if (bundle.get("regime") or {}).get("label") == "risk_off" and getattr(settings, "regime_guard", True):
+        blocked.append("risk-off index regime")
     return {"eligible": not blocked, "blocked_reasons": blocked}

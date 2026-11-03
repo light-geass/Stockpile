@@ -24,7 +24,13 @@ MIN_QUERY = 2
 MAX_QUERY = 40
 MAX_RESULTS = 8
 _EQ = re.compile(r"^NSE:([A-Z0-9&\-]+)-EQ$")
+_ETF = re.compile(r"\bETF\b|BEES\b|INDEX FUND|\bINVIT\b|\bREIT\b", re.I)
 _STRIKE = 15  # field index that is "-1" for cash instruments and a price for derivatives
+
+
+def classify_asset(name, symbol=""):
+    blob = f"{name} {symbol}"
+    return "ETF" if _ETF.search(blob) or "BEES" in (symbol or "").upper() else "EQUITY"
 
 
 def _is_cash_strike(raw):
@@ -60,7 +66,7 @@ def parse_master(text):
             continue  # derivatives, debt, indices or odd series — not analysable cash equity
         short = _clean(row[13], 40).upper() or m.group(1)
         name = _clean(row[1]) or short
-        out.append({"symbol": short, "name": name, "exchange": "NSE", "asset_type": "EQUITY",
+        out.append({"symbol": short, "name": name, "exchange": "NSE", "asset_type": classify_asset(name, short),
                     "provider": "fyers", "provider_symbol": symbol, "currency": "INR",
                     "isin": _clean(row[5], 20) or None})
     if not out:

@@ -20,6 +20,22 @@ FACT_SPEC = [  # (path, label, unit)
     ("news.total", "Relevant headlines", ""), ("news.positive", "Positive headlines", ""),
     ("news.negative", "Negative headlines", ""), ("freshness", "Data freshness", ""),
     ("market_session", "Market session", ""),
+    ("technicals.atr14_pct", "ATR(14) of price", "%"),
+    ("technicals.overnight_gap_median_pct", "Median overnight gap", "%"),
+    ("technicals.overnight_gap_p5_pct", "Overnight gap 5% tail", "%"),
+    ("technicals.stop_level", "Stop level", "INR"),
+    ("regime.label", "Index regime", ""), ("regime.ret_20d", "Index 20-day return", "%"),
+    ("etf.premium_pct", "ETF premium/discount to NAV", "%"),
+    ("etf.nav_source", "ETF NAV basis (live iNAV vs EOD)", ""),
+    ("etf.tracking_diff_20d", "ETF 20-day tracking difference", "%"),
+    ("etf.adv", "ETF average daily volume", "shares"),
+    ("etf.expense_ratio", "ETF expense ratio", "%"),
+    ("ipo.listing_date", "IPO listing date", ""), ("ipo.age_days", "Days since listing", ""),
+    ("ipo.vs_issue_pct", "Price vs issue price", "%"), ("ipo.sme", "SME board listing", ""),
+    ("ipo.checklist_complete", "IPO risk checklist complete", ""),
+    ("events.next_date", "Next scheduled event", ""),
+    ("prediction.1.p_up", "P(+1d up)", ""), ("prediction.5.p_up", "P(+5d up)", ""),
+    ("prediction.20.p_up", "P(+20d up)", ""),
 ]
 STRUCTURAL = {0, 1, 52, 100}
 
@@ -40,6 +56,14 @@ def build_facts(bundle):
         v = _get(bundle, path)
         if v is not None:
             facts.append({"id": f"E{len(facts) + 1}", "path": path, "label": label, "value": v, "unit": unit})
+    for i, it in enumerate((bundle.get("events") or {}).get("items") or []):
+        d, kind = it.get("date"), it.get("kind") or "event"
+        if not d:
+            continue
+        label = {"results": "Results on", "ex_dividend": "Ex-dividend on", "dividend": "Dividend on",
+                 "board": "Board meeting on"}.get(kind, "Corporate event on")
+        facts.append({"id": f"E{len(facts) + 1}", "path": f"events.items.{i}.date",
+                      "label": f"{label} {d}", "value": d, "unit": ""})
     chart = bundle.get("chart") or {}
     if chart.get("available"):
         facts.append({"id": f"E{len(facts) + 1}", "path": "chart.status", "label": "Chart pattern status",
@@ -103,8 +127,13 @@ def verify_statement(text, cited_ids, index, facts):
     for i in cited_ids:
         if i not in index:
             issues.append(f"unknown evidence id {i}")
-    allowed = {float(f["value"]) for f in facts if isinstance(f["value"], (int, float)) and not isinstance(f["value"], bool)}
-    allowed |= STRUCTURAL
+    allowed = set(STRUCTURAL)
+    for f in facts:
+        v = f.get("value")
+        if isinstance(v, (int, float)) and not isinstance(v, bool):
+            allowed.add(float(v))
+        elif isinstance(v, str):
+            allowed |= {n for n, _ in numbers_in(v)}
     for i in cited_ids:
         it = index.get(i)
         if it and "title" in it:

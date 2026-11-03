@@ -43,7 +43,7 @@ def test_second_run_while_running_rejected(mk):
 
 def test_failed_telegram_is_recorded_not_fatal(mk, monkeypatch):
     monkeypatch.setattr(ev, "market_session", lambda now=None: "open")
-    deps = {"fyers": FakeProvider(), "gdelt": FakeGdelt(), "yf": FakeYF, "telegram": FakeTG(ok=False)}
+    deps = {"fyers": FakeProvider(), "gdelt": FakeGdelt(), "gnews": FakeGNews(), "yf": FakeYF, "telegram": FakeTG(ok=False)}
     app, _ = mk({**live_env(), "TELEGRAM_ENABLED": "true", "TELEGRAM_BOT_TOKEN": "t", "TELEGRAM_CHAT_ID": "1"}, deps)
     st = run(app, "live")
     assert st["status"] == "done" and any(v["alert"]["status"] == "failed" for v in st["verdicts"])
@@ -78,6 +78,19 @@ class FakeGdelt:
         return [{"title": f"{q} wins record order", "url": "https://x.example/a", "domain": "x.example", "seendate": "20261028T040000Z"}], None
 
 
+class FakeGNews:
+    """The pipeline falls back to Google News RSS whenever yfinance returns <3 headlines. Without an injected
+    fake that is a real 15s HTTP GET per symbol, so a run against the live network made the suite hang rather
+    than fail. Tests must never touch the network (see conftest)."""
+
+    def __init__(self):
+        self.queries = []
+
+    def __call__(self, q, **k):
+        self.queries.append(q)
+        return [], "gnews_unreachable"
+
+
 class FakeYF:
     class Ticker:
         def __init__(self, s):
@@ -93,7 +106,7 @@ def live_env():
 def test_live_end_to_end_with_mocks_sends_one_alert_per_day(mk, monkeypatch):
     monkeypatch.setattr(ev, "market_session", lambda now=None: "open")
     tg = FakeTG()
-    deps = {"fyers": FakeProvider(), "gdelt": FakeGdelt(), "yf": FakeYF, "telegram": tg}
+    deps = {"fyers": FakeProvider(), "gdelt": FakeGdelt(), "gnews": FakeGNews(), "yf": FakeYF, "telegram": tg}
     app, _ = mk({**live_env(), "TELEGRAM_ENABLED": "true", "TELEGRAM_BOT_TOKEN": "t", "TELEGRAM_CHAT_ID": "1"}, deps)
     st = run(app, "live")
     assert st["status"] == "done" and st["watchlist"]["name"] == "Watchlist 1"
@@ -116,7 +129,7 @@ def test_live_market_closed_blocks_alerts(mk, monkeypatch):
     monkeypatch.setattr(ev, "market_session", lambda now=None: "closed")
     tg = FakeTG()
     app, _ = mk({**live_env(), "TELEGRAM_ENABLED": "true", "TELEGRAM_BOT_TOKEN": "t", "TELEGRAM_CHAT_ID": "1"},
-                {"fyers": FakeProvider(), "gdelt": FakeGdelt(), "yf": FakeYF, "telegram": tg})
+                {"fyers": FakeProvider(), "gdelt": FakeGdelt(), "gnews": FakeGNews(), "yf": FakeYF, "telegram": tg})
     st = run(app, "live")
     assert st["status"] == "done" and not [m for m in tg.sent if "BUY SIGNAL" in m]
     assert any("Market is closed" in w for w in st["warnings"])
@@ -124,14 +137,14 @@ def test_live_market_closed_blocks_alerts(mk, monkeypatch):
 
 
 def test_live_expired_token_aborts_gracefully_and_marks_expired(mk):
-    app, _ = mk(live_env(), {"fyers": FakeProvider(FyersError("auth_expired", "x", -16)), "gdelt": FakeGdelt(), "yf": FakeYF})
+    app, _ = mk(live_env(), {"fyers": FakeProvider(FyersError("auth_expired", "x", -16)), "gdelt": FakeGdelt(), "gnews": FakeGNews(), "yf": FakeYF})
     st = run(app, "live")
     assert st["status"] == "error" and "expired" in st["message"].lower()
     assert app.extensions["auth"].status()["state"] == "expired"
 
 
 def test_live_rate_limit_aborts_with_message(mk):
-    app, _ = mk(live_env(), {"fyers": FakeProvider(FyersError("rate_limited", "FYERS rate limit hit")), "gdelt": FakeGdelt(), "yf": FakeYF})
+    app, _ = mk(live_env(), {"fyers": FakeProvider(FyersError("rate_limited", "FYERS rate limit hit")), "gdelt": FakeGdelt(), "gnews": FakeGNews(), "yf": FakeYF})
     st = run(app, "live")
     assert st["status"] == "error" and "rate limit" in st["message"].lower()
 
@@ -143,7 +156,7 @@ def test_yfinance_failure_degrades_to_data_gaps(mk, monkeypatch):
         class Ticker:
             def __init__(self, s):
                 raise RuntimeError("yahoo down")
-    app, _ = mk(live_env(), {"fyers": FakeProvider(), "gdelt": FakeGdelt(), "yf": Boom})
+    app, _ = mk(live_env(), {"fyers": FakeProvider(), "gdelt": FakeGdelt(), "gnews": FakeGNews(), "yf": Boom})
     st = run(app, "live")
     assert st["status"] == "done" and all(any("analyst" in g for g in v["gaps"]) for v in st["verdicts"])
 
@@ -193,7 +206,7 @@ def test_focused_run_for_a_covered_stock_reports_coverage(mk, monkeypatch):
                 seen.append(s)
                 self.recommendations = None
                 self.info = {"recommendationKey": "buy", "numberOfAnalystOpinions": 14, "targetMeanPrice": 470.0}
-    app, _ = mk(live_env(), {"fyers": FakeProvider(), "gdelt": FakeGdelt(), "yf": YF})
+    app, _ = mk(live_env(), {"fyers": FakeProvider(), "gdelt": FakeGdelt(), "gnews": FakeGNews(), "yf": YF})
     app.extensions["pipeline"].run("live", {**FOCUSED, "symbol": "ITC", "provider_symbol": "NSE:ITC-EQ"})
     st = app.extensions["pipeline"].snapshot()
     assert seen == ["ITC.NS"]                              # never a bare 'ITC' or None
@@ -287,9 +300,12 @@ def test_chart_stage_reuses_candles_and_attaches_scores3(mk, monkeypatch):
     class Counting(FakeProvider):
         def __init__(self):
             super().__init__()
-            self.daily_calls = 0
+            self.daily_calls, self.bench_calls = 0, 0
 
         def daily_candles(self, sym, days=366):
+            if sym == "NSE:NIFTYBEES-EQ":
+                self.bench_calls += 1  # regime, ETF tracking and the reference row share one request
+                return super().daily_candles(sym, days)
             self.daily_calls += 1
             today = datetime.now(IST).replace(hour=0, minute=0, second=0, microsecond=0)
             out = []
@@ -302,11 +318,12 @@ def test_chart_stage_reuses_candles_and_attaches_scores3(mk, monkeypatch):
             return out
 
     fp = Counting()
-    app, _ = mk(live_env(), {"fyers": fp, "gdelt": FakeGdelt(), "yf": FakeYF})
+    app, _ = mk(live_env(), {"fyers": fp, "gdelt": FakeGdelt(), "gnews": FakeGNews(), "yf": FakeYF})
     st = run(app, "live")
     assert st["status"] == "done" and st["agents"]["chart"]["status"] == "done"
     n = len(st["verdicts"])
     assert fp.daily_calls == n and st["agents"]["chart"]["stats"]["analyzed"] == n  # candles reused, not re-fetched
+    assert fp.bench_calls == 1  # regime + ETF tracking + reference row share one benchmark request
     for v in st["verdicts"]:
         d = v["detail"]
         assert d["chart"]["status"] == "ok" and d["chart"]["timeframe"] == "1D"
@@ -329,7 +346,7 @@ def focused_env():
 def test_focused_run_analyses_only_the_selected_instrument_without_alerts(mk, monkeypatch):
     monkeypatch.setattr(ev, "market_session", lambda now=None: "open")
     tg = FakeTG()
-    deps = {"fyers": FakeProvider(), "gdelt": FakeGdelt(), "yf": FakeYF, "telegram": tg}
+    deps = {"fyers": FakeProvider(), "gdelt": FakeGdelt(), "gnews": FakeGNews(), "yf": FakeYF, "telegram": tg}
     app, _ = mk(focused_env(), deps)
     p = app.extensions["pipeline"]
     p.run("live", dict(FOCUSED))
@@ -345,7 +362,7 @@ def test_focused_run_analyses_only_the_selected_instrument_without_alerts(mk, mo
 
 
 def test_focused_run_is_recorded_with_its_scope(mk):
-    app, _ = mk(live_env(), {"fyers": FakeProvider(), "gdelt": FakeGdelt(), "yf": FakeYF})
+    app, _ = mk(live_env(), {"fyers": FakeProvider(), "gdelt": FakeGdelt(), "gnews": FakeGNews(), "yf": FakeYF})
     app.extensions["pipeline"].run("live", dict(FOCUSED))
     import json
     mode, summary = db_rows(app.extensions["store"], "SELECT mode, summary FROM runs")[-1]
@@ -364,7 +381,7 @@ def test_focused_run_without_known_yf_mapping_reports_a_gap_not_a_guess(mk, monk
                 seen.append(s)
                 raise AssertionError("must not fetch an unmapped ticker")
 
-    app, _ = mk(live_env(), {"fyers": FakeProvider(), "gdelt": FakeGdelt(), "yf": SpyYF})
+    app, _ = mk(live_env(), {"fyers": FakeProvider(), "gdelt": FakeGdelt(), "gnews": FakeGNews(), "yf": SpyYF})
     app.extensions["pipeline"].run("live", {**FOCUSED, "provider_symbol": "NSE:XYZ-ETF-EQ"})
     st = app.extensions["pipeline"].snapshot()
     assert seen == [] and st["status"] == "done"
@@ -376,7 +393,7 @@ def test_focused_run_without_a_quote_is_a_clear_error(mk):
         def quotes(self, syms):
             return {}
 
-    app, _ = mk(live_env(), {"fyers": NoQuote(), "gdelt": FakeGdelt(), "yf": FakeYF})
+    app, _ = mk(live_env(), {"fyers": NoQuote(), "gdelt": FakeGdelt(), "gnews": FakeGNews(), "yf": FakeYF})
     app.extensions["pipeline"].run("live", dict(FOCUSED))
     st = app.extensions["pipeline"].snapshot()
     assert st["status"] == "error" and "no live quote" in st["message"].lower()
@@ -396,7 +413,7 @@ def test_focused_run_technical_failure_degrades_to_gaps(mk, monkeypatch):
         def daily_candles(self, sym, days=366):
             raise FyersError("invalid", "no historical data")
 
-    app, _ = mk(live_env(), {"fyers": NoCandles(), "gdelt": FakeGdelt(), "yf": FakeYF})
+    app, _ = mk(live_env(), {"fyers": NoCandles(), "gdelt": FakeGdelt(), "gnews": FakeGNews(), "yf": FakeYF})
     app.extensions["pipeline"].run("live", dict(FOCUSED))
     st = app.extensions["pipeline"].snapshot()
     assert st["status"] == "done"
@@ -408,7 +425,7 @@ def test_focused_run_permission_error_on_candles_aborts(mk):
         def daily_candles(self, sym, days=366):
             raise FyersError("permission", "no historical data")
 
-    app, _ = mk(live_env(), {"fyers": NoPerm(), "gdelt": FakeGdelt(), "yf": FakeYF})
+    app, _ = mk(live_env(), {"fyers": NoPerm(), "gdelt": FakeGdelt(), "gnews": FakeGNews(), "yf": FakeYF})
     app.extensions["pipeline"].run("live", dict(FOCUSED))
     st = app.extensions["pipeline"].snapshot()
     assert st["status"] == "error" and "historical data" in st["message"].lower()
@@ -418,7 +435,7 @@ def test_analyze_selected_api_starts_a_focused_run_and_status_reports_scope(mk):
     import re
     cat = instrument_search.InstrumentCatalogue(http=FakeHTTP(), records=instrument_search.parse_master(MASTER))
     tg = FakeTG()
-    app, _ = mk(focused_env(), {"catalogue": cat, "fyers": FakeProvider(), "gdelt": FakeGdelt(),
+    app, _ = mk(focused_env(), {"catalogue": cat, "fyers": FakeProvider(), "gdelt": FakeGdelt(), "gnews": FakeGNews(),
                                 "yf": FakeYF, "telegram": tg})
     from tests.conftest import LOCAL
     c = app.test_client()
