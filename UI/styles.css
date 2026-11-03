@@ -328,6 +328,7 @@ body { min-height: 100vh; position: relative; overflow-x: hidden; }
 .dropdown-list li {
   padding: 9px 12px; border-radius: var(--radius-sm); cursor: pointer; display: flex;
   align-items: center; justify-content: space-between; gap: 12px; transition: var(--transition-fast);
+  user-select: none; -webkit-user-select: none; touch-action: manipulation;
 }
 .dropdown-list li:hover, .dropdown-list li[aria-selected="true"] { background: var(--surface-hover); }
 .dropdown-list li b { font-size: 14px; font-weight: 700; color: var(--text-primary); }
@@ -339,6 +340,7 @@ body { min-height: 100vh; position: relative; overflow-x: hidden; }
   border: 1px solid var(--accent); border-radius: var(--radius-full); padding: 7px 14px 7px 18px;
   font-size: 13.5px; box-shadow: 0 0 16px var(--accent-glow); max-width: 100%; overflow: hidden;
 }
+.selection-pill .pill-check { color: var(--color-buy); font-weight: 800; font-size: 14px; }
 .selection-pill b { font-weight: 750; color: var(--accent); }
 .selection-pill small { color: var(--text-muted); }
 .selection-pill button {

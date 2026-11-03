@@ -284,6 +284,8 @@ function renderDashboard(s) {
 function updateControlsState() {
   const cur = state.watchlists.find(w => w.id === state.activeWatchlistId);
   const count = cur?.count || 0, isWl = state.workspace === 'watchlist';
+  const qVal = document.getElementById('q')?.value.trim() || '';
+  const canAnalyzeSelected = Boolean(state.chosenInstrument || (qVal.length >= 2 && state.search.items.length > 0));
 
   const runWl = document.getElementById('runWl'), go = document.getElementById('go'), goSel = document.getElementById('goSel'), wlAdd = document.getElementById('wlAdd');
   if (runWl) { runWl.value = state.activeWatchlistId || ''; runWl.disabled = !state.watchlists.length; }
@@ -291,7 +293,10 @@ function updateControlsState() {
     go.disabled = state.isRunning || (isWl ? !state.chosenInstrument : count === 0);
     const s = go.querySelector('span'); if (s) s.textContent = state.isRunning ? 'Working…' : (isWl ? 'Add to watchlist' : 'Run analysis');
   }
-  if (goSel) { goSel.disabled = state.isRunning || !state.chosenInstrument; goSel.hidden = isWl; }
+  if (goSel) {
+    goSel.disabled = state.isRunning || !canAnalyzeSelected;
+    goSel.hidden = isWl;
+  }
   if (wlAdd) wlAdd.hidden = isWl || !state.chosenInstrument || state.activeWatchlistId == null;
 
   const wlRename = document.getElementById('wlRename'), wlDel = document.getElementById('wlDel');
@@ -397,9 +402,9 @@ function switchWorkspace(mode) {
 // ============================================================================
 
 function closeSearchDropdown() {
-  state.search.items = []; state.search.activeIndex = -1;
+  state.search.activeIndex = -1;
   const res = document.getElementById('res'), q = document.getElementById('q');
-  if (res) { res.hidden = true; res.replaceChildren(); }
+  if (res) { res.hidden = true; }
   if (q) { q.setAttribute('aria-expanded', 'false'); q.removeAttribute('aria-activedescendant'); }
 }
 
@@ -424,14 +429,19 @@ function paintSearch(note) {
 function selectInstrument(item) {
   if (!item) return;
   state.chosenInstrument = item;
-  const q = document.getElementById('q'); if (q) q.value = '';
+  const q = document.getElementById('q');
+  if (q) {
+    q.value = '';
+    q.placeholder = `Selected: ${item.symbol} (${item.name})`;
+  }
   closeSearchDropdown();
   const pill = document.getElementById('sel');
   if (pill) {
     pill.replaceChildren(
+      h('span', { class: 'pill-check' }, '✓'),
       h('b', {}, item.symbol),
       h('small', {}, `${item.name} · ${item.exchange}`),
-      h('button', { type: 'button', 'aria-label': 'Clear', 'data-action': 'clear-selection' }, '✕')
+      h('button', { type: 'button', 'aria-label': 'Clear selection', 'data-action': 'clear-selection', title: 'Clear selection' }, '✕')
     );
     pill.hidden = false;
   }
@@ -456,6 +466,7 @@ async function executeSearch() {
     if (seq !== state.search.querySeq) return;
     state.search.items = d.results || [];
     state.search.activeIndex = -1;
+    updateControlsState();
     if (!state.search.items.length) { paintSearch('No matching instruments.'); return; }
     paintSearch();
   } catch (_) { if (seq === state.search.querySeq) paintSearch('Network error.'); }
@@ -633,7 +644,9 @@ function setupEvents() {
     const pickSearch = target.closest('[data-action="pick-search"]');
     if (pickSearch) {
       const i = parseInt(pickSearch.dataset.index, 10);
-      selectInstrument(state.search.items[i]);
+      if (state.search.items[i]) {
+        selectInstrument(state.search.items[i]);
+      }
       return;
     }
 
@@ -642,9 +655,19 @@ function setupEvents() {
       state.chosenInstrument = null;
       const pill = document.getElementById('sel');
       if (pill) { pill.hidden = true; pill.replaceChildren(); }
+      const q = document.getElementById('q');
+      if (q) {
+        q.value = '';
+        q.placeholder = 'Search a stock / ETF / listed IPO (e.g. TCS, NIFTYBEES, ZOMATO)…';
+        q.focus();
+      }
       updateControlsState();
-      document.getElementById('q')?.focus();
       return;
+    }
+
+    // Close search dropdown on click outside
+    if (!target.closest('.search-box')) {
+      closeSearchDropdown();
     }
 
     // Workspace tab switch
@@ -708,8 +731,30 @@ function setupEvents() {
 
     // Analyze selected instrument
     if (target.closest('#goSel')) {
-      if (!state.chosenInstrument) return;
-      const res = await api('/api/analyze-selected', { method: 'POST', body: JSON.stringify({ provider_symbol: state.chosenInstrument.provider_symbol }) });
+      let inst = state.chosenInstrument;
+      if (!inst) {
+        if (state.search.items.length > 0) {
+          inst = state.search.items[0];
+          selectInstrument(inst);
+        } else {
+          const qVal = document.getElementById('q')?.value.trim();
+          if (qVal && qVal.length >= 2) {
+            try {
+              const r = await api(`/api/instruments/search?q=${encodeURIComponent(qVal)}`);
+              const d = await r.json();
+              if (d.results?.length) {
+                inst = d.results[0];
+                selectInstrument(inst);
+              }
+            } catch (_) {}
+          }
+        }
+      }
+      if (!inst) {
+        showNotice('warn', 'Please search and select a stock to analyze.', 3000);
+        return;
+      }
+      const res = await api('/api/analyze-selected', { method: 'POST', body: JSON.stringify({ provider_symbol: inst.provider_symbol }) });
       if (res.status === 409) { showNotice('warn', 'Run already in progress.', 3000); return; }
       if (!res.ok) { showNotice('bad', 'Targeted run failed.', 4000); return; }
       startPolling();
@@ -763,6 +808,24 @@ function setupEvents() {
     updateControlsState();
   });
 
+  // Search dropdown listeners to prevent focus loss & blur race condition
+  const resList = document.getElementById('res');
+  if (resList) {
+    resList.addEventListener('mousedown', e => {
+      e.preventDefault(); // Keep input focused, preventing blur timer from firing
+    });
+    const pickHandler = e => {
+      const pick = e.target.closest('[data-action="pick-search"]');
+      if (pick) {
+        const i = parseInt(pick.dataset.index, 10);
+        if (state.search.items[i]) {
+          selectInstrument(state.search.items[i]);
+        }
+      }
+    };
+    resList.addEventListener('pointerdown', pickHandler);
+  }
+
   // Search input events
   const q = document.getElementById('q');
   if (q) {
@@ -771,29 +834,43 @@ function setupEvents() {
         state.chosenInstrument = null;
         const pill = document.getElementById('sel');
         if (pill) { pill.hidden = true; pill.replaceChildren(); }
-        updateControlsState();
       }
+      updateControlsState();
       clearTimeout(state.search.timer);
-      state.search.timer = setTimeout(executeSearch, 250);
+      state.search.timer = setTimeout(executeSearch, 200);
     });
 
     q.addEventListener('keydown', e => {
       if (e.key === 'Escape') { closeSearchDropdown(); return; }
-      if (!state.search.items.length) return;
       if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        if (!state.search.items.length) return;
         e.preventDefault();
         const d = e.key === 'ArrowDown' ? 1 : -1;
         state.search.activeIndex = (state.search.activeIndex + d + state.search.items.length) % state.search.items.length;
         paintSearch();
         return;
       }
-      if (e.key === 'Enter' && state.search.activeIndex >= 0) {
+      if (e.key === 'Enter') {
         e.preventDefault();
-        selectInstrument(state.search.items[state.search.activeIndex]);
+        const pick = state.search.activeIndex >= 0
+          ? state.search.items[state.search.activeIndex]
+          : state.search.items[0];
+        if (pick) {
+          selectInstrument(pick);
+        } else if (state.chosenInstrument) {
+          document.getElementById('goSel')?.click();
+        }
+        return;
       }
     });
 
-    q.addEventListener('blur', () => setTimeout(closeSearchDropdown, 180));
+    q.addEventListener('blur', () => {
+      setTimeout(() => {
+        if (!document.activeElement?.closest('.search-box')) {
+          closeSearchDropdown();
+        }
+      }, 250);
+    });
   }
 }
 

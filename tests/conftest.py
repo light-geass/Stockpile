@@ -10,7 +10,46 @@ if str(ROOT) not in sys.path:
 import _bootstrap  # noqa: F401, E402
 import config  # noqa: E402
 from app import create_app  # noqa: E402
-from watchlists import UNIVERSE_SEED  # noqa: E402
+from services.watchlists import UNIVERSE_SEED  # noqa: E402
+import services.config as config  # noqa: E402
+import services.watchlists as watchlists  # noqa: E402
+import services.storage as storage  # noqa: E402
+import services.security as security  # noqa: E402
+import services.notifier as notifier  # noqa: E402
+import engine.pipeline as pipeline  # noqa: E402
+import engine.scoring as scoring  # noqa: E402
+import engine.evidence as evidence  # noqa: E402
+import engine.playbook as playbook  # noqa: E402
+import engine.sizing as sizing  # noqa: E402
+import agents.chart_patterns as chart_patterns  # noqa: E402
+import agents.regime as regime  # noqa: E402
+import agents.grounding as grounding  # noqa: E402
+import agents.llm as llm  # noqa: E402
+import agents.predict as predict  # noqa: E402
+import agents.outcomes as outcomes  # noqa: E402
+import market.data_sources as data_sources  # noqa: E402
+import market.fyers_client as fyers_client  # noqa: E402
+import market.fyers_auth as fyers_auth  # noqa: E402
+import market.instrument_search as instrument_search  # noqa: E402
+import market.news as news  # noqa: E402
+import market.events as events  # noqa: E402
+import market.etf as etf  # noqa: E402
+import market.ipo as ipo  # noqa: E402
+
+for _k, _v in (
+    ("config", config), ("watchlists", watchlists), ("storage", storage),
+    ("security", security), ("notifier", notifier), ("pipeline", pipeline),
+    ("scoring", scoring), ("evidence", evidence), ("playbook", playbook),
+    ("sizing", sizing), ("chart_patterns", chart_patterns), ("regime", regime),
+    ("grounding", grounding), ("llm", llm), ("predict", predict),
+    ("outcomes", outcomes), ("data_sources", data_sources),
+    ("fyers_client", fyers_client), ("fyers_auth", fyers_auth),
+    ("instrument_search", instrument_search), ("news", news),
+    ("events", events), ("etf", etf), ("ipo", ipo),
+):
+    sys.modules[_k] = _v
+from app import create_app  # noqa: E402
+from services.watchlists import UNIVERSE_SEED  # noqa: E402
 
 TUNNEL = "abc-123.ngrok-free.app"
 LOCAL = "http://127.0.0.1:5000"

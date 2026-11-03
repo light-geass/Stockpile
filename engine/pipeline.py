@@ -5,26 +5,26 @@ import threading
 import time
 from datetime import datetime, timezone
 
-import data_sources as ds
-import chart_patterns as cp
-import etf
-import events
-import evidence as ev
-import ipo
-import llm
-import news as newsmod
-import playbook
-import predict
-import regime
-from fyers_client import FyersClient, FyersError
-from grounding import build_facts
-from notifier import Telegram, format_buy, format_summary
-import outcomes
-from outcomes import DISCLAIMER
-from security import redact
-from sizing import guidance
-from storage import Store
-from watchlists import WatchlistError
+import market.data_sources as ds
+import agents.chart_patterns as cp
+import market.etf as etf
+import market.events as events
+import engine.evidence as ev
+import market.ipo as ipo
+import agents.llm as llm
+import market.news as newsmod
+import engine.playbook as playbook
+import agents.predict as predict
+import agents.regime as regime
+from market.fyers_client import FyersClient, FyersError
+from agents.grounding import build_facts
+from services.notifier import Telegram, format_buy, format_summary
+import agents.outcomes as outcomes
+from agents.outcomes import DISCLAIMER
+from services.security import redact
+from engine.sizing import guidance
+from services.storage import Store
+from services.watchlists import WatchlistError
 
 log = logging.getLogger("pipeline")
 AGENTS = [

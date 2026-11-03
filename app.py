@@ -83,14 +83,12 @@ def create_app(settings=None, deps=None, store_path=None):
                       PERMANENT_SESSION_LIFETIME=8 * 3600, MAX_CONTENT_LENGTH=64 * 1024)
     app.session_interface = HostAwareSessionInterface()
     app.debug = False
-    # pyrefly: ignore[missing-attribute]
     app.json.sort_keys = False  # keep agent pipeline order in JSON
     install_log_redaction(s.secret_values)
 
     store = Store(store_path or (s.data_dir / "audit.sqlite3"), s.secret_values())
     auth = FyersAuth(s, TokenStore(config.LOCAL_DIR / "fyers_token.json"), (deps or {}).get("http", __import__("requests")))
     watchlists = (deps or {}).get("watchlists") or WatchlistStore(s.database_url, s.watchlist_max_items)
-    # pyrefly: ignore[bad-argument-type]
     pipe = Pipeline(s, auth, store, deps, watchlists)
     catalogue = (deps or {}).get("catalogue") or InstrumentCatalogue(s.instrument_catalogue_url,
                                                                      s.instrument_catalogue_ttl)
