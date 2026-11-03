@@ -355,7 +355,9 @@ def create_app(settings=None, deps=None, store_path=None):
     def api_replay():
         """Bootstrap a baseline backtest from history instead of waiting weeks of live runs.
         Technical features only, and the universe is today's symbol master — both stated in the payload."""
-        ref = (request.args.get("provider_symbol") or "").strip()
+        ref = (request.args.get("provider_symbol") or "").strip().upper()
+        if not ref.startswith("NSE:") and not ref.startswith("BSE:"):
+            ref = f"NSE:{ref}-EQ"
         if not ref or len(ref) > 60:
             return jsonify(error="bad_instrument", message="Pass ?provider_symbol=NSE:TCS-EQ."), 400
         if not auth.get_token() and not (deps or {}).get("fyers"):
